@@ -24,7 +24,7 @@ SOFTWARE.
 
 ## Attribution
 
-The ratchet design in this package is adapted, with permission of its MIT
+The ratchet design in this package is adapted, under the terms of its MIT
 licence, from the `code_health/` directory of PortfolioOptimisers.jl by Daniel
 Celis Garza:
 

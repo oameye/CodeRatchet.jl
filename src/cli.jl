@@ -19,17 +19,19 @@ function main(args::AbstractVector{<:AbstractString}=ARGS)
 end
 
 function dispatch(args)
-  metric = metric_from(args[1])
-  metric === nothing && return usage("unknown metric $(repr(args[1]))")
-  verb, flags = args[2], args[3:end]
   root = get(ENV, "CODERATCHET_ROOT", pwd())
   dir = ratchet_dir(root)
+  metric = metric_from(args[1], root)
+  metric === nothing && return usage("unknown metric $(repr(args[1]))")
+  verb, flags = args[2], args[3:end]
 
   verb == "check" && return do_check(metric, root, dir)
   verb == "refresh" && return do_refresh(metric, root, dir, "--accept-rise" in flags)
   verb == "candidates" && return do_candidates(metric, root, dir)
   verb == "triage" && return do_triage(metric, root, dir, flags)
   verb == "terminal" && return do_terminal(metric, root, dir)
+  verb == "methods" && return do_methods(metric, root, dir)
+  verb == "report" && return do_report(metric, root, dir)
   return usage("unknown verb $(repr(verb))")
 end
 
@@ -59,7 +61,7 @@ function do_check(metric::Metric, root::AbstractString, dir::AbstractString)
     step_summary("### CodeRatchet $(report.metric)\n\n" * rise_table(report.violations))
   end
   println()
-  println(routes(; dismissal=metric_name(metric) == "jet"))
+  println(routes(; dismissal=dismissal_section(metric)))
 
   # A provenance mismatch means the numbers came from a different tool, so an
   # artifact built from them would be the wrong file to commit.
@@ -86,7 +88,7 @@ function do_refresh(metric::Metric, root::AbstractString, dir::AbstractString, a
   catch err
     println(stderr, sprint(showerror, err))
     println(stderr)
-    println(stderr, routes(; dismissal=metric_name(metric) == "jet"))
+    println(stderr, routes(; dismissal=dismissal_section(metric)))
     return 1
   end
 end
@@ -130,11 +132,39 @@ function do_terminal(metric::Metric, root::AbstractString, dir::AbstractString)
   return 0
 end
 
-function metric_from(name::AbstractString)
+function do_methods(metric::Metric, root::AbstractString, dir::AbstractString)
+  metric isa Boxes || return usage("methods is boxes-only")
+  found = boxed_methods(root; dir)
+  isempty(found) && (println("no method boxes a capture"); return 0)
+  println(length(found), " boxed capture(s):")
+  for line in found
+    println("  ", line)
+  end
+  return 0
+end
+
+function do_report(metric::Metric, root::AbstractString, dir::AbstractString)
+  metric isa Lsp || return usage("report is lsp-only")
+  found = lsp_report(root; dir)
+  isempty(found) && (println("no undismissed diagnostics"); return 0)
+  println(length(found), " undismissed diagnostic(s):")
+  for line in found
+    println("  ", line)
+  end
+  return 0
+end
+
+function metric_from(name::AbstractString, root::AbstractString)
   return if name == "complexity"
     Complexity()
   elseif name == "coverage"
     Coverage()
+  elseif name == "style"
+    Style(root)
+  elseif name == "boxes"
+    Boxes()
+  elseif name == "lsp"
+    Lsp()
   elseif name == "jet"
     jet_metric()
   else
@@ -157,18 +187,21 @@ function jet_metric()
   return ext.Inference()
 end
 
-function usage(problem::Union{Nothing,AbstractString}=nothing)
-  problem === nothing || println(stderr, "coderatchet: ", problem)
+usage(problem::AbstractString) = (println(stderr, "coderatchet: ", problem); usage())
+
+function usage()
   println(
     stderr,
     """
 usage: coderatchet <metric> <verb> [flags]
-  metrics: complexity | coverage | jet
+  metrics: complexity | coverage | style | boxes | lsp | jet
   verbs:   check
            refresh [--accept-rise]
            candidates                        (complexity only)
            triage [--issues FILE] [--refile-closed]
            terminal                          (coverage only)
+           methods                           (boxes only)
+           report                            (lsp only)
   env:     CODERATCHET_ROOT, CODERATCHET_DIR, COVERAGE_LCOV""",
   )
   return 2

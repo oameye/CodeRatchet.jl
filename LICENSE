@@ -58,5 +58,17 @@ with the whole-token title match that decides what is already filed.
 Several docstrings in this package paraphrase the rationale comments in that
 work closely enough to be considered derived text, not independent authorship.
 
+The `Boxes` metric's detection is derived from `contrib/scan-closure-boxes.jl`
+in JuliaLang/julia at commit 0dc8a09, MIT:
+
+    Copyright (c) 2009-2024 Julia contributors
+    https://julialang.org/license
+
+Specifically the two forms a `Core.Box` construction takes in lowered code, the
+slot-to-source-name lookup, and walking to the root module so a submodule's
+methods count against its package. The blob is on no branch: it was dropped
+from PR #60478 before that PR merged. The metric is equivalent to
+`Test.detect_closure_boxes`, which shipped from that PR on Julia 1.14.
+
 The approach was described at
 https://discourse.julialang.org/t/idiomatic-julia-code-in-ai-generated-code/139183/4

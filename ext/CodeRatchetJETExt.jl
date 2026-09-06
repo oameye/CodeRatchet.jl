@@ -29,6 +29,7 @@ struct Inference <: CodeRatchet.Metric end
 
 CodeRatchet.metric_name(::Inference) = "jet"
 CodeRatchet.binding(::Inference) = ("reviewed",)
+CodeRatchet.dismissal_section(::Inference) = "dismissal"
 CodeRatchet.row_numbers(::Inference) = ("raw", "reviewed")
 
 """
@@ -67,10 +68,13 @@ function CodeRatchet.provenance(::Inference, root::AbstractString)
 end
 
 """
-    attribute(report, root) -> Union{String,Nothing}
+    attribute(report, root) -> String
 
-The repository-relative file a report belongs to, or `nothing` when no frame
-of it lies inside the repository.
+The repository-relative file a report belongs to, or `""` when no frame of it
+lies inside the repository.
+
+Empty string rather than `nothing`: a repository-relative path is never empty,
+so the sentinel is unambiguous and no caller has to carry a union.
 
 The deepest matching frame wins. JET orders `vst` outermost first, so this
 scans backwards: the innermost repository frame is where the problem actually
@@ -87,7 +91,7 @@ function attribute(report, root::AbstractString)
     startswith(rel, "..") && continue
     return rel
   end
-  return nothing
+  return ""
 end
 
 """
@@ -142,7 +146,6 @@ function CodeRatchet.measure(::Inference, root::AbstractString)
   )
   for report in reports
     rel = attribute(report, root)
-    rel === nothing && continue
     haskey(rows, rel) || continue
     numbers = rows[rel].numbers
     numbers["raw"] += 1

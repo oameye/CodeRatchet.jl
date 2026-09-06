@@ -19,7 +19,7 @@ module CodeRatchet
 using JuliaSyntax: JuliaSyntax
 using TOML: TOML
 
-export Complexity, Coverage, check, refresh
+export Boxes, Complexity, Coverage, Lsp, Style, check, refresh
 
 # --- what a measurement is -------------------------------------------------
 
@@ -108,6 +108,18 @@ right when the metric has no natural zero. Coverage overrides it: an added file
 enters fully covered or exempted, because there the zero is meaningful.
 """
 entry_failures(::Metric, ::AbstractString, paths, rows) = String[]
+
+"""
+    dismissal_section(metric) -> String
+
+The `rulings.toml` section holding this metric's dismissals, or `""` when it
+has none.
+
+Only a metric whose findings can be *wrong* gets dismissals. A complexity
+number is never wrong, so there is nothing to dismiss and the remedy must not
+offer the route; an inference report can be a false positive, so it must.
+"""
+dismissal_section(::Metric) = ""
 
 """
     ruling_failures(metric, root) -> Vector{String}
@@ -567,18 +579,21 @@ end
 """
     routes(; dismissal) -> String
 
-The remedy, in its three ordered routes.
+The remedy, in its ordered routes.
 
 Order matters. A refresh is the last route, not the first, and naming it first
-would make it the reflex. The dismissal route is JET-only.
+would make it the reflex. The dismissal route appears only for a metric that
+has one, named by `dismissal_section`.
 """
-function routes(; dismissal::Bool)
+function routes(; dismissal::AbstractString)
   io = IOBuffer()
   println(io, "A refresh is not the fix. Take one of these routes, in order.")
   println(io, "  1. Lower the number.")
   n = 2
-  if dismissal
-    println(io, "  2. Add a [[dismissal]] to $RULINGS, with the reason it is not a defect.")
+  if !isempty(dismissal)
+    println(
+      io, "  2. Add a [[$dismissal]] to $RULINGS, with the reason it is not a defect."
+    )
     n = 3
   end
   println(io, "  $n. Record the rise deliberately, with `refresh --accept-rise`.")
@@ -681,6 +696,9 @@ end
 
 include("complexity.jl")
 include("coverage.jl")
+include("style.jl")
+include("boxes.jl")
+include("lsp.jl")
 include("triage.jl")
 include("cli.jl")
 

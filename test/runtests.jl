@@ -669,14 +669,22 @@ reason = "Test code."
 
   @testset "reporting" begin
     @testset "the remedy names a refresh last, not first" begin
-      text = routes(; dismissal=false)
+      text = routes(; dismissal="")
       @test occursin("A refresh is not the fix", text)
       @test findfirst("Lower the number", text)[1] < findfirst("Record the rise", text)[1]
     end
 
-    @testset "the dismissal route appears only for JET" begin
-      @test occursin("[[dismissal]]", routes(; dismissal=true))
-      @test !occursin("[[dismissal]]", routes(; dismissal=false))
+    @testset "the dismissal route appears only where the metric has one" begin
+      @test occursin("[[dismissal]]", routes(; dismissal="dismissal"))
+      @test occursin("[[lsp_dismissal]]", routes(; dismissal="lsp_dismissal"))
+      @test !occursin("dismissal", routes(; dismissal=""))
+    end
+
+    @testset "only a metric whose findings can be wrong offers a dismissal" begin
+      @test CodeRatchet.dismissal_section(Complexity()) == ""
+      @test CodeRatchet.dismissal_section(Coverage()) == ""
+      @test CodeRatchet.dismissal_section(Boxes()) == ""
+      @test CodeRatchet.dismissal_section(Lsp()) == "lsp_dismissal"
     end
 
     @testset "the rise table names every offending file" begin
@@ -712,5 +720,8 @@ reason = "Test code."
     @test_throws ErrorException read_rulings(mktempdir())
   end
 
+  include("style_metric.jl")
+  include("boxes_metric.jl")
+  include("lsp_metric.jl")
   include("jet_metric.jl")
 end

@@ -1,0 +1,182 @@
+# The Lsp metric: JETLS diagnostics, parsed from the tool's own report.
+
+using Test
+using CodeRatchet
+using CodeRatchet: Diagnostic, Lsp, dismissed, lsp_settings, parse_diagnostics, read_rulings
+
+# A real `jetls check --context-lines=0` report, trimmed. Real output rather
+# than an invented shape: the parser's whole job is to survive this format.
+const JETLS_OUTPUT = """
+# Analyzed 9 files in 11.67s
+# Found 3 diagnostics in 2 files (1 warning, 1 info, 1 hint)
+
+# @ src/Pkg.jl:24,1
+export B, A
+└──────────┘ ── Names are not sorted alphabetically [hint:lowering/unsorted-import-names]
+
+# @ src/inner.jl:79,33
+function project(operator)
+#                └──────┘ ── Unused argument `operator` [info:lowering/unused-argument]
+
+# @ src/inner.jl:240,1
+if maybe
+└──────┘ ── non-boolean `Missing` found in boolean context [warn:inference/type-error/non-bool-cond]
+"""
+
+const LSP_RULINGS = """
+[scope]
+measure = ["src/"]
+
+[lsp]
+entry = ["src/Pkg.jl"]
+
+[[lsp_dismissal]]
+code = "lowering/unsorted-import-names"
+reason = "Export order groups by concept here, not alphabetically."
+"""
+
+@testset "the Lsp metric" begin
+  @testset "parsing" begin
+    found, claimed = parse_diagnostics(JETLS_OUTPUT, "/repo")
+
+    @testset "every diagnostic is found" begin
+      @test claimed == 3
+      @test length(found) == 3
+    end
+
+    @testset "location comes from the header, not the gutter" begin
+      @test found[1].path == "src/Pkg.jl"
+      @test found[1].line == 24
+      @test found[2].path == "src/inner.jl"
+      @test found[2].line == 79
+      @test found[3].line == 240
+    end
+
+    @testset "severity and code come from the tag" begin
+      @test found[1].severity == "hint"
+      @test found[1].code == "lowering/unsorted-import-names"
+      @test found[2].severity == "info"
+      @test found[3].severity == "warn"
+      @test found[3].code == "inference/type-error/non-bool-cond"
+    end
+
+    @testset "the message drops the gutter and keeps the text" begin
+      @test found[1].message == "Names are not sorted alphabetically"
+      @test found[2].message == "Unused argument `operator`"
+      @test found[3].message == "non-boolean `Missing` found in boolean context"
+    end
+
+    @testset "an absolute path is made repository-relative" begin
+      text = replace(JETLS_OUTPUT, "# @ src/" => "# @ /repo/src/")
+      again, _ = parse_diagnostics(text, "/repo")
+      @test first(again).path == "src/Pkg.jl"
+    end
+
+    @testset "a report with no diagnostics parses to none" begin
+      empty, total = parse_diagnostics(
+        "# Analyzed 9 files in 1.0s\n# Found 0 diagnostics in 0 files\n", "/repo"
+      )
+      @test isempty(empty)
+      @test total == 0
+    end
+  end
+
+  @testset "dismissals" begin
+    rulings = read_rulings(
+      dirname(
+        (
+          root=gitrepo(Dict("src/Pkg.jl" => "module Pkg end"); rulings=LSP_RULINGS);
+          joinpath(root, "code_ratchet", "rulings.toml")
+        ),
+      ),
+    )
+    hint = Diagnostic(
+      "src/Pkg.jl", 24, "hint", "lowering/unsorted-import-names", "Names are not sorted"
+    )
+    unused = Diagnostic(
+      "src/inner.jl", 79, "info", "lowering/unused-argument", "Unused argument `operator`"
+    )
+
+    @testset "a dismissal matching the code holds" begin
+      @test dismissed(hint, rulings)
+    end
+
+    @testset "an undismissed diagnostic stands" begin
+      @test !dismissed(unused, rulings)
+    end
+  end
+
+  @testset "a dismissal narrows as more of it is named" begin
+    make(body) = read_rulings(
+      dirname(
+        (
+          root=gitrepo(Dict("src/a.jl" => "f(x) = x"); rulings=body);
+          joinpath(root, "code_ratchet", "rulings.toml")
+        ),
+      ),
+    )
+    base = "[scope]\nmeasure = [\"src/\"]\n\n[lsp]\nentry = [\"src/a.jl\"]\n"
+    d = Diagnostic("src/a.jl", 1, "info", "lowering/unused-argument", "Unused argument `x`")
+
+    code_only = make(
+      base * "\n[[lsp_dismissal]]\ncode = \"lowering/unused-argument\"\nreason = \"r\"\n"
+    )
+    @test dismissed(d, code_only)
+
+    # Adding a field that does not match must NARROW the dismissal, never widen
+    # it. A dismissal that grew as it was specified would be a trap.
+    with_pattern = make(
+      base *
+      "\n[[lsp_dismissal]]\ncode = \"lowering/unused-argument\"\n" *
+      "pattern = \"never matches this\"\nreason = \"r\"\n",
+    )
+    @test !dismissed(d, with_pattern)
+
+    wrong_severity = make(
+      base *
+      "\n[[lsp_dismissal]]\ncode = \"lowering/unused-argument\"\n" *
+      "severity = \"error\"\nreason = \"r\"\n",
+    )
+    @test !dismissed(d, wrong_severity)
+  end
+
+  @testset "a dismissal naming nothing would dismiss everything, so it is refused" begin
+    rulings = read_rulings(
+      dirname(
+        (
+          root=gitrepo(
+            Dict("src/a.jl" => "f(x) = x");
+            rulings="[scope]\nmeasure = [\"src/\"]\n\n[[lsp_dismissal]]\nreason = \"r\"\n",
+          );
+          joinpath(root, "code_ratchet", "rulings.toml")
+        ),
+      ),
+    )
+    d = Diagnostic("src/a.jl", 1, "info", "c", "m")
+    @test_throws ErrorException dismissed(d, rulings)
+  end
+
+  @testset "settings" begin
+    @testset "full analysis is the default, against the flag's habit" begin
+      root = gitrepo(Dict("src/Pkg.jl" => "module Pkg end"); rulings=LSP_RULINGS)
+      settings = lsp_settings(read_rulings(joinpath(root, "code_ratchet")))
+      @test settings.skip_full_analysis == false
+      @test settings.entry == ["src/Pkg.jl"]
+      @test settings.severity == "hint"
+    end
+
+    @testset "a missing entry list is refused" begin
+      root = gitrepo(
+        Dict("src/a.jl" => "f(x) = x"); rulings="[scope]\nmeasure = [\"src/\"]\n"
+      )
+      @test_throws ErrorException lsp_settings(read_rulings(joinpath(root, "code_ratchet")))
+    end
+  end
+
+  @testset "the metric's shape" begin
+    @test metric_name(Lsp()) == "lsp"
+    @test binding(Lsp()) == ("reviewed",)
+    @test row_numbers(Lsp()) == ("raw", "reviewed")
+    @test CodeRatchet.dismissal_section(Lsp()) == "lsp_dismissal"
+  end
+end

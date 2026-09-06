@@ -82,9 +82,9 @@ end
     @test EXT.attribute(report, root) == "src/inner.jl"
   end
 
-  @testset "a report with no repository frame is attributed to nothing" begin
+  @testset "a report with no repository frame is attributed to no file" begin
     report = MethodErrorReport([StubFrame(Symbol("/elsewhere/x.jl"), 1)], "boom")
-    @test EXT.attribute(report, root) === nothing
+    @test EXT.attribute(report, root) == ""
   end
 
   @testset "dismissal by class" begin

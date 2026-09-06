@@ -8,13 +8,20 @@ reach today, which an absolute gate never is. "JET reports zero" cannot be
 switched on for a package with 200 reports. "No file gains a report" can be
 switched on this afternoon.
 
-Three metrics today, one comparison rule:
+Five metrics today, one comparison rule:
 
 | Metric | Binds on | Context it also records | Cost |
 | --- | --- | --- | --- |
 | `Complexity()` | the **maximum** over a file's definitions, per metric | the sums | ~1 s |
 | `Coverage()` | a file's **unexempted miss count** | relevant lines, exempted lines | ~1 s |
+| `Style()` | one count per configured house rule | nothing; every rule binds | ~1 s |
+| `Boxes()` | a file's **`Core.Box`** count | nothing; the count is the whole finding | seconds |
+| `Lsp()` | a file's **reviewed** JETLS diagnostic count | the raw count | ~30 s |
 | `Inference()` | a file's **reviewed** JET report count | the raw count | minutes |
+
+Ordered by cost, and a repository should run them in that order: a gate that
+takes a second and catches the common mistake should fail before one that takes
+minutes.
 
 ## Why those numbers and not the obvious ones
 
@@ -38,6 +45,31 @@ raises `lines` and leaves `misses` alone.
 *class* of report, so the fifteenth instance of an already-dismissed class must
 stay green. Binding on the raw count would turn every new instance of a known
 non-defect red.
+
+**Style binds a preference, which is what a ratchet is for.** A house rule is
+not a defect, so an absolute gate on one is unadoptable the day it is written:
+the rules most worth holding are the ones the codebase already breaks. Adding a
+rule to such a repository turns every offending file red at once, because a
+number absent from the baseline reads as zero, and the first
+`refresh --accept-rise` writes the debt down in a diff a reviewer can size.
+Named syntax-tree rules come first and a regex escape hatch second: a regex
+that has to know Julia syntax is a regex that is wrong on the case you have not
+thought of yet.
+
+**Boxes binds a count, and the Julia version is part of provenance.** Lowering
+decides what boxes, and lowering changes between releases: 1.12 stopped boxing a
+capture reassigned *before* the closure is built, which is the textbook example.
+A baseline from another minor version is not comparable, so the version binds
+and a mismatch fails with a reason rather than handing back a phantom
+improvement.
+
+**JETLS is not a second JET.** JET analyses inference; JETLS analyses lowering,
+and finds undefined globals, unused imports and arguments, and dead branches.
+The two overlap almost nowhere. `Lsp()` also defaults `skip_full_analysis` to
+false, against the habit the flag invites: skipping the full analysis leaves
+JETLS without the module a file belongs to, so its imports read as unused and
+its macros read as undefined. Measured on a nine-file package, the flag turned
+seven real diagnostics into fourteen mostly false ones.
 
 **Thresholds are not the pass rule.** The ratchet stops decay; driving
 improvement is a separate, paced job. A file far above every threshold stays
@@ -97,6 +129,44 @@ reason = "Symbolic dispatch the analyser cannot follow."
 package = "YourPackage"
 target_modules = ["YourPackage"]
 load = []                            # extension triggers, if any
+
+[style]                              # style only
+rules = ["union_nothing", "underscore_name", "implicit_kwarg"]
+
+[[style_pattern]]                    # style only, for a rule no built-in covers
+name = "debug_print"
+pattern = "^\\s*println\\("
+reason = "Debug output left in library code."
+
+[boxes]                              # boxes only
+package = "YourPackage"
+load = []
+
+[lsp]                                # lsp only
+entry = ["src/YourPackage.jl"]       # what `jetls check` is pointed at
+
+[[lsp_dismissal]]                    # lsp only
+code = "lowering/unsorted-import-names"
+reason = "Exports are grouped by concept here, not alphabetically."
+```
+
+The built-in style rules:
+
+| Rule | Counts |
+| --- | --- |
+| `union_nothing` | `Union{Nothing,T}` in any position, however either name is qualified |
+| `underscore_name` | a definition named with a leading underscore, and the file itself when its name carries one |
+| `implicit_kwarg` | a keyword passed at a call site with no `;`: `f(a = 1)` rather than `f(; a = 1)` |
+
+`implicit_kwarg` exempts definition signatures, and the exemption is
+load-bearing rather than lenient: `f(x, a = 1)` in a signature declares an
+*optional positional* argument, which the parser also represents as `:kw`.
+
+`Lsp()` needs the [`jetls`](https://github.com/aviatesk/JETLS.jl) binary on
+`PATH`, not a Julia dependency:
+
+```sh
+julia -e 'using Pkg; Pkg.Apps.add(; url="https://github.com/aviatesk/JETLS.jl", rev="release")'
 ```
 
 Every tracked `.jl` file must be either inside `[scope].measure` or named by an
@@ -122,7 +192,13 @@ coderatchet complexity refresh --accept-rise   # record a worse number, delibera
 coderatchet complexity candidates         # rank work; never gates
 coderatchet complexity triage --issues open.tsv   # plan the issues to open
 coderatchet coverage terminal             # files still short of zero misses
+coderatchet boxes methods                 # name every boxed capture, and its variable
+coderatchet lsp report                    # every undismissed JETLS diagnostic
 ```
+
+`terminal`, `candidates`, `methods` and `report` say what to *fix*; the ratchet
+says only what *regressed*. A count is not actionable on its own, so each of
+them names the thing rather than counting it.
 
 where `coderatchet` is
 `julia --project=code_ratchet -e 'using CodeRatchet; exit(CodeRatchet.main())'`.

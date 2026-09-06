@@ -136,6 +136,22 @@ function jet_candidates(root::AbstractString; dir::AbstractString=ratchet_dir(ro
 end
 
 """
+    configured_style_candidates(root; dir) -> Vector{Candidate}
+
+House-rule breaches, or none when the repository does not run the style metric.
+
+Triage ranks across every metric a repository has, and a repository that has
+not configured one is not a repository with a broken triage job.
+"""
+function configured_style_candidates(
+  root::AbstractString; dir::AbstractString=ratchet_dir(root)
+)
+  rulings = read_rulings(dir)
+  haskey(rulings.raw, "style") || haskey(rulings.raw, "style_pattern") || return Candidate[]
+  return style_candidates(root; dir)
+end
+
+"""
     Plan
 
 What the scheduled job decided: the issues to open, and why the rest were not.
@@ -191,7 +207,11 @@ function triage(
   known = parse_issues(issues)
   open_count = count(i -> i.state == "OPEN", known)
 
-  candidates = vcat(complexity_candidates(root; dir), jet_candidates(root; dir))
+  candidates = vcat(
+    complexity_candidates(root; dir),
+    configured_style_candidates(root; dir),
+    jet_candidates(root; dir),
+  )
 
   worst = Dict{String,Candidate}()
   details = Dict{String,Vector{String}}()

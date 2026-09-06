@@ -1,0 +1,29 @@
+name = "CodeRatchet"
+uuid = "0e86a969-c127-44ad-8bee-7851ffae31d4"
+authors = ["Orjan Ameye <orjan.ameye@hotmail.com>"]
+version = "0.1.0"
+
+[deps]
+CodeComplexity = "6a833b0f-2137-4092-987b-66bce4e6b438"
+JuliaSyntax = "70703baa-626e-46a2-a12c-08ffd08c73b4"
+TOML = "fa267f1f-6049-4f14-aa54-33bafae1ed76"
+
+[weakdeps]
+JET = "c3a54625-cd67-489e-a8e7-0a5a0ff4e31b"
+
+[extensions]
+CodeRatchetJETExt = "JET"
+
+[compat]
+CodeComplexity = "0.2"
+JET = "0.9, 0.10, 0.11, 0.12"
+JuliaSyntax = "1"
+TOML = "1"
+julia = "1.10"
+
+[extras]
+JET = "c3a54625-cd67-489e-a8e7-0a5a0ff4e31b"
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test", "JET"]

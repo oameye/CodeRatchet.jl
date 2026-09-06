@@ -1,0 +1,8 @@
+# Resolved per machine, not shared: this is a library, not an application.
+Manifest.toml
+
+# Coverage and allocation artefacts.
+*.jl.cov
+*.jl.*.cov
+*.jl.mem
+lcov.info

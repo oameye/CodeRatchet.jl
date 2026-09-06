@@ -1,0 +1,49 @@
+MIT License
+
+Copyright (c) 2026 Orjan Ameye
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---
+
+## Attribution
+
+The ratchet design in this package is adapted, with permission of its MIT
+licence, from the `code_health/` directory of PortfolioOptimisers.jl by Daniel
+Celis Garza:
+
+    Copyright (c) Daniel Celis Garza
+    https://github.com/dcelisgarza/PortfolioOptimisers.jl
+    MIT License
+
+Specifically adapted from that work: binding complexity on the maximum over a
+file's definitions rather than the sum; binding coverage on the miss count
+rather than the percentage; binding JET on a reviewed count with named
+dismissals; keeping thresholds out of the pass rule; checking parseability
+separately; pairing renames on a row's full number set; splitting measured
+baselines from hand-written rulings; the `rulings.toml` section structure; the
+unmeasured-path assertion; deepest-repository-frame attribution; pinning the
+JET load set in provenance; and the check / refresh / refresh --accept-rise
+verbs.
+
+Several docstrings in this package paraphrase the rationale comments in that
+work closely enough to be considered derived text, not independent authorship.
+
+The approach was described at
+https://discourse.julialang.org/t/idiomatic-julia-code-in-ai-generated-code/139183/4

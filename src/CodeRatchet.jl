@@ -128,6 +128,22 @@ number in this package.
 direction(::Metric, ::AbstractString) = :down
 
 """
+    debt(metric, key) -> Bool
+
+Whether a nonzero value of `key` means the file owes work.
+
+Almost every number here counts something that should not be there, so the
+default is `true`. A **maximum** is the exception: every non-empty file has a
+cyclomatic maximum of at least one, so a nonzero `cyc` is not evidence of
+anything and listing it as debt buries the numbers that are.
+
+Distinct from `binding`, which asks whether a key can fail the gate. A maximum
+both binds and is not debt: it must not rise, and its current value is not a
+complaint.
+"""
+debt(::Metric, ::AbstractString) = true
+
+"""
     dismissal_section(metric) -> String
 
 The `rulings.toml` section holding this metric's dismissals, or `""` when it
@@ -760,5 +776,7 @@ include("docs.jl")
 include("lsp.jl")
 include("triage.jl")
 include("cli.jl")
+include("all.jl")
+include("init.jl")
 
 end # module CodeRatchet

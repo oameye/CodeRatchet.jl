@@ -14,8 +14,97 @@ a red gate by downloading that file and committing it at its recorded path,
 with no Julia and no local environment.
 """
 function main(args::AbstractVector{<:AbstractString}=ARGS)
+  isempty(args) && return usage()
+  root = get(ENV, "CODERATCHET_ROOT", pwd())
+  # `init` and `all` are not about one metric, so they are matched before the
+  # first argument is read as a metric name.
+  args[1] == "init" && return do_init(root, args[2:end])
+  args[1] == "all" && return do_group(root, args[2:end])
   length(args) >= 2 && return dispatch(args)
   return usage()
+end
+
+"""
+    do_init(root, flags) -> Int
+
+Scaffold `code_ratchet/`, then say what to run next. It writes configuration
+and takes no baselines: three of the metrics need an environment that does not
+exist until the file this command just wrote has been instantiated.
+"""
+function do_init(root::AbstractString, flags)
+  dir = ratchet_dir(root)
+  written = try
+    initialise(root; dir, force=("--force" in flags))
+  catch err
+    println(stderr, sprint(showerror, err))
+    return 1
+  end
+  if isempty(written)
+    println("nothing written; pass --force to overwrite what is already there")
+  else
+    foreach(p -> println("wrote ", p), written)
+  end
+  println()
+  println("Next, from the repository root:")
+  println("  julia --project=$(relpath(dir, root)) -e 'using Pkg; Pkg.instantiate()'")
+  println(
+    "  julia --project=$(relpath(dir, root)) ",
+    "-e 'using CodeRatchet; exit(CodeRatchet.main())' all refresh",
+  )
+  println()
+  println("That takes the first baselines. Commit them with $(RULINGS).")
+  return 0
+end
+
+"""
+    do_group(root, args) -> Int
+
+Run one verb across every metric `[metrics].run` names.
+
+Each gate reports itself, so a failure explains itself where it happened. The
+line at the end exists because five PASS lines and one FAIL scroll past, and
+the answer to "did it pass" should not need re-reading.
+"""
+function do_group(root::AbstractString, args)
+  dir = ratchet_dir(root)
+  verb = isempty(args) ? "check" : args[1]
+  metrics = try
+    configured_metrics(root; dir)
+  catch err
+    println(stderr, sprint(showerror, err))
+    return 1
+  end
+
+  verb == "scorecard" && (print(scorecard(root; dir)); return 0)
+  verb in ("check", "refresh") ||
+    return usage("`all` takes check, refresh or scorecard, not $(repr(verb))")
+
+  failed = String[]
+  for metric in metrics
+    println("── ", metric_name(metric), " ", "─"^max(0, 60 - length(metric_name(metric))))
+    code = if verb == "check"
+      do_check(metric, root, dir)
+    else
+      do_refresh(metric, root, dir, any(f -> f in ("--accept-change", "--accept-rise"), args))
+    end
+    code == 0 || push!(failed, metric_name(metric))
+  end
+
+  println()
+  if isempty(failed)
+    println("CodeRatchet: all ", length(metrics), " gate(s) passed.")
+    return 0
+  end
+  println(
+    "CodeRatchet: ",
+    length(failed),
+    " of ",
+    length(metrics),
+    " gate(s) failed (",
+    join(failed, ", "),
+    ").",
+  )
+  return 1
 end
 
 function dispatch(args)
@@ -213,6 +302,8 @@ function usage()
     stderr,
     """
 usage: coderatchet <metric> <verb> [flags]
+         coderatchet init [--force]
+         coderatchet all [check | refresh | scorecard]
   metrics: complexity | coverage | style | docs | boxes | lsp | jet
   verbs:   check
            refresh [--accept-change]

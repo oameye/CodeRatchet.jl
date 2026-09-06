@@ -867,5 +867,6 @@ reason = "Test code."
   include("docs_metric.jl")
   include("boxes_metric.jl")
   include("lsp_metric.jl")
+  include("group_and_init.jl")
   include("jet_metric.jl")
 end

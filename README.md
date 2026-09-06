@@ -100,6 +100,47 @@ measuring without failing is worse than no gate.
 
 ## Setting it up in a repository
 
+```sh
+julia -e 'using CodeRatchet; exit(CodeRatchet.main())' init
+julia --project=code_ratchet -e 'using Pkg; Pkg.instantiate()'
+julia --project=code_ratchet -e 'using CodeRatchet; exit(CodeRatchet.main())' all refresh
+```
+
+`init` writes both configuration files from what the repository already says:
+the package name and UUID from its `Project.toml`, the measured scope from the
+directories that exist, and an `[[unmeasured_path]]` for every other directory
+git tracks a `.jl` file in. That last part is why the first `all check` is
+green rather than a list of orphaned files, which is the moment most people
+decide a tool is not worth it. It never overwrites an existing `rulings.toml`
+without `--force`.
+
+Only the three metrics needing no extra setup are switched on. `coverage`,
+`boxes`, `lsp` and `jet` are written in commented out, because switching on a
+gate a repository cannot yet run makes its first check fail for a reason that
+has nothing to do with its code.
+
+**CodeRatchet needs Julia 1.12, and your package does not.** The ratchet
+environment is its own, so a package supporting 1.10 can still be gated by a
+job running 1.12.
+
+### In CI
+
+```yaml
+jobs:
+  ratchet:
+    uses: oameye/CodeRatchet.jl/.github/workflows/ratchet.yml@main
+    with:
+      julia-version: '1.12'
+      install-jetls: true      # only if you run the lsp metric
+```
+
+Calling the workflow rather than copying it means the gate's CI behaviour has
+one definition. Forty copies drift; one call does not.
+
+### By hand
+
+
+
 Add a `code_ratchet/` directory with two files.
 
 `code_ratchet/Project.toml`:
@@ -192,18 +233,15 @@ Every tracked `.jl` file must be either inside `[scope].measure` or named by an
 is the point: a new top-level directory cannot fall through unmeasured and
 silent.
 
-Then take the first baselines:
-
-```sh
-julia --project=code_ratchet -e 'using CodeRatchet; CodeRatchet.main()' complexity refresh
-julia --project=code_ratchet -e 'using JET, CodeRatchet; CodeRatchet.main()' jet refresh
-COVERAGE_LCOV=lcov.info julia --project=code_ratchet \
-  -e 'using CodeRatchet; CodeRatchet.main()' coverage refresh
-```
+Then take the first baselines with `all refresh`, or one metric at a time.
 
 ## Using it
 
 ```sh
+coderatchet all check                     # every configured gate, cheapest first
+coderatchet all refresh                   # every baseline
+coderatchet all scorecard                 # where the recorded debt actually is
+
 coderatchet complexity check              # exit 1 if any binding number rose
 coderatchet complexity refresh            # refuses if a number rose
 coderatchet complexity refresh --accept-change # record a worse number, deliberately
@@ -223,6 +261,29 @@ where `coderatchet` is
 `julia --project=code_ratchet -e 'using CodeRatchet; exit(CodeRatchet.main())'`.
 The JET metric additionally needs `using JET` in that call, because it lives in
 a package extension.
+
+`[metrics].run` in `rulings.toml` names which gates `all` runs. It is the one
+place the set is written down: a list of commands in a Makefile is a second
+place, and the two drift.
+
+`scorecard` reads the baselines rather than measuring, so it costs nothing and
+answers the question the gate never does. `check` says what regressed; the
+scorecard says where the debt is, ranked by how many metrics flag a file rather
+than by the numbers, because a cyclomatic 11 and a JET report are not on one
+scale and adding them would invent a total that means nothing.
+
+```
+3 file(s) carrying debt, worst first, across complexity, style, docs, boxes, lsp, jet:
+  src/gksl_coordinates.jl   complexity: cyc_over=2 cog_over=2  |  lsp: reviewed=1
+  src/engine.jl             complexity: cog_over=1
+  src/periodic_operator.jl  lsp: reviewed=1
+  (6 file(s) at zero, not listed)
+```
+
+A maximum never appears there. Every non-empty file has a cyclomatic maximum of
+at least one, so a nonzero `cyc` is not evidence of anything, and listing it
+would bury the numbers that are. That is `debt(metric, key)`, and it is a
+separate question from `binding`: a maximum both binds and is not debt.
 
 Environment: `CODERATCHET_ROOT` (repository root, default `pwd()`),
 `CODERATCHET_DIR` (default `<root>/code_ratchet`), `COVERAGE_LCOV`.

@@ -1,0 +1,49 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  test:
+    name: Julia ${{ matrix.julia }} / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # 1.12 is the floor, not a preference. Boxes needs Base.visit, the
+        # `public` keyword the Docstrings metric reads is 1.11, and 1.12 is
+        # where lowering stopped boxing a capture reassigned before capture.
+        julia: ['1.12']
+        os: [ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: ${{ matrix.julia }}
+      - uses: julia-actions/cache@v2
+      # The fixtures are real git repositories, because the gate takes its file
+      # list from `git ls-files`. Committing in one needs an identity.
+      - name: Give git an identity for the fixtures
+        run: |
+          git config --global user.email "ci@example.com"
+          git config --global user.name "CI"
+      - uses: julia-actions/julia-buildpkg@v1
+      - uses: julia-actions/julia-runtest@v1
+
+  format:
+    name: Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: '1'
+      - run: julia -e 'using Pkg; Pkg.Apps.add("JuliaFormatter")'
+      - run: ~/.julia/bin/jlfmt --check .

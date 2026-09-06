@@ -1,0 +1,75 @@
+# The gate, as a workflow an adopting repository calls rather than copies.
+#
+#   jobs:
+#     ratchet:
+#       uses: oameye/CodeRatchet.jl/.github/workflows/ratchet.yml@main
+#       with:
+#         julia-version: '1.12'
+#
+# Copying a workflow into forty repositories means forty copies that drift.
+# Calling one means the gate's CI behaviour has a single definition, and a fix
+# to it reaches every repository on their next run.
+
+name: Ratchet
+
+on:
+  workflow_call:
+    inputs:
+      julia-version:
+        description: 'Julia version to run the gate under.'
+        type: string
+        default: '1.12'
+      ratchet-dir:
+        description: 'Where rulings.toml and the baselines live.'
+        type: string
+        default: 'code_ratchet'
+      install-jetls:
+        description: 'Install the jetls binary. Needed only by the lsp metric.'
+        type: boolean
+        default: false
+      timeout-minutes:
+        description: 'Cap on the whole job. JET and JETLS are the slow parts.'
+        type: number
+        default: 30
+
+jobs:
+  ratchet:
+    name: Ratchet
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: ${{ inputs.julia-version }}
+
+      - uses: julia-actions/cache@v2
+
+      - name: Install jetls
+        if: ${{ inputs.install-jetls }}
+        run: |
+          julia -e 'using Pkg; Pkg.Apps.add(; url="https://github.com/aviatesk/JETLS.jl", rev="release")'
+          echo "$HOME/.julia/bin" >> "$GITHUB_PATH"
+
+      - name: Instantiate the ratchet environment
+        run: julia --project=${{ inputs.ratchet-dir }} -e 'using Pkg; Pkg.instantiate()'
+
+      # JET lives in a package extension, so it must be loaded for the jet
+      # metric to resolve. Loading it when the repository does not run that
+      # metric costs a little time and breaks nothing.
+      - name: Check every configured gate
+        run: |
+          julia --project=${{ inputs.ratchet-dir }} \
+            -e 'using CodeRatchet; try; @eval using JET; catch; end; exit(CodeRatchet.main())' \
+            all check
+
+      # The point of the artifact: a contributor fixes a red gate by
+      # downloading this and committing it, with no Julia and no local setup.
+      - name: Upload the refresh artifact
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coderatchet-refresh
+          path: ${{ inputs.ratchet-dir }}/_refresh/
+          if-no-files-found: ignore

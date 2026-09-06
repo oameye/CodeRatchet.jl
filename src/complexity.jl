@@ -49,6 +49,10 @@ function row_numbers(::Complexity)
   )
 end
 
+# A maximum is not debt: every non-empty file has one, and only the count of
+# definitions standing above the threshold says a file owes work.
+debt(::Complexity, key::AbstractString) = endswith(key, "_over")
+
 """
 The `[thresholds]` key each complexity metric reads, for the count of
 definitions standing above it.

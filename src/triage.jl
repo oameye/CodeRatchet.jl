@@ -88,11 +88,10 @@ Definitions standing above their threshold, one candidate per definition.
 """
 function complexity_candidates(root::AbstractString; dir::AbstractString=ratchet_dir(root))
   rulings = read_rulings(dir)
-  names = Dict("cyc" => "cyclomatic", "cog" => "cognitive", "arg" => "argcount")
   found = Candidate[]
   for rel in scoped_files(root, rulings.scope)
     for (key, cc) in COMPLEXITY_METRICS
-      threshold = get(rulings.thresholds, names[key], 0)
+      threshold = get(rulings.thresholds, COMPLEXITY_THRESHOLDS[key], 0)
       threshold > 0 || continue
       for fn in measure_file(cc, joinpath(root, rel)).functions
         fn.value > threshold || continue
@@ -101,7 +100,7 @@ function complexity_candidates(root::AbstractString; dir::AbstractString=ratchet
           Candidate(
             rel,
             "complexity",
-            "$(fn.name):$(fn.line) $(names[key])=$(fn.value) > $threshold",
+            "$(fn.name):$(fn.line) $(COMPLEXITY_THRESHOLDS[key])=$(fn.value) > $threshold",
             fn.value / threshold,
           ),
         )

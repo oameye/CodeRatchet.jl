@@ -9,7 +9,7 @@ whether to `exit`.
 
 In CI a failing check emits one `::error` annotation per offending file, writes
 a rise table to the step summary, and stages a **refresh artifact**: the
-baseline as `refresh --accept-rise` would have written it. A contributor fixes
+baseline as `refresh --accept-change` would have written it. A contributor fixes
 a red gate by downloading that file and committing it at its recorded path,
 with no Julia and no local environment.
 """
@@ -26,12 +26,15 @@ function dispatch(args)
   verb, flags = args[2], args[3:end]
 
   verb == "check" && return do_check(metric, root, dir)
-  verb == "refresh" && return do_refresh(metric, root, dir, "--accept-rise" in flags)
+  verb == "refresh" && return do_refresh(
+    metric, root, dir, any(f -> f in ("--accept-change", "--accept-rise"), flags)
+  )
   verb == "candidates" && return do_candidates(metric, root, dir)
   verb == "triage" && return do_triage(metric, root, dir, flags)
   verb == "terminal" && return do_terminal(metric, root, dir)
   verb == "methods" && return do_methods(metric, root, dir)
   verb == "report" && return do_report(metric, root, dir)
+  verb == "undocumented" && return do_undocumented(metric, root, dir)
   return usage("unknown verb $(repr(verb))")
 end
 
@@ -42,7 +45,8 @@ function do_check(metric::Metric, root::AbstractString, dir::AbstractString)
 
   for v in report.violations
     annotate(
-      v.path, "$(v.key) rose $(v.from) -> $(v.to); the ratchet holds it at $(v.from)."
+      v.path,
+      "$(v.key) $(moved(v)) $(v.from) -> $(v.to); the ratchet holds it at $(v.from).",
     )
   end
   for path in report.unparsable
@@ -61,7 +65,7 @@ function do_check(metric::Metric, root::AbstractString, dir::AbstractString)
     step_summary("### CodeRatchet $(report.metric)\n\n" * rise_table(report.violations))
   end
   println()
-  println(routes(; dismissal=dismissal_section(metric)))
+  println(routes(; dismissal=dismissal_section(metric), moves=advised_move(metric)))
 
   # A provenance mismatch means the numbers came from a different tool, so an
   # artifact built from them would be the wrong file to commit.
@@ -79,16 +83,18 @@ end
 
 function do_refresh(metric::Metric, root::AbstractString, dir::AbstractString, accept::Bool)
   try
-    report = refresh(metric, root; dir, accept_rise=accept)
+    report = refresh(metric, root; dir, accept_change=accept)
     println("wrote ", baseline_path(metric, dir))
     accept &&
       !isempty(report.violations) &&
-      println("  recorded ", length(report.violations), " rise(s) deliberately")
+      println("  recorded ", length(report.violations), " change(s) deliberately")
     return 0
   catch err
     println(stderr, sprint(showerror, err))
     println(stderr)
-    println(stderr, routes(; dismissal=dismissal_section(metric)))
+    println(
+      stderr, routes(; dismissal=dismissal_section(metric), moves=advised_move(metric))
+    )
     return 1
   end
 end
@@ -154,6 +160,17 @@ function do_report(metric::Metric, root::AbstractString, dir::AbstractString)
   return 0
 end
 
+function do_undocumented(metric::Metric, root::AbstractString, dir::AbstractString)
+  metric isa Docstrings || return usage("undocumented is docs-only")
+  owed = undocumented(root; dir)
+  isempty(owed) && (println("every public name has a docstring"); return 0)
+  println(length(owed), " public name(s) with no docstring:")
+  for line in owed
+    println("  ", line)
+  end
+  return 0
+end
+
 function metric_from(name::AbstractString, root::AbstractString)
   return if name == "complexity"
     Complexity()
@@ -161,6 +178,8 @@ function metric_from(name::AbstractString, root::AbstractString)
     Coverage()
   elseif name == "style"
     Style(root)
+  elseif name == "docs"
+    Docstrings()
   elseif name == "boxes"
     Boxes()
   elseif name == "lsp"
@@ -194,14 +213,15 @@ function usage()
     stderr,
     """
 usage: coderatchet <metric> <verb> [flags]
-  metrics: complexity | coverage | style | boxes | lsp | jet
+  metrics: complexity | coverage | style | docs | boxes | lsp | jet
   verbs:   check
-           refresh [--accept-rise]
+           refresh [--accept-change]
            candidates                        (complexity only)
            triage [--issues FILE] [--refile-closed]
            terminal                          (coverage only)
            methods                           (boxes only)
            report                            (lsp only)
+           undocumented                      (docs only)
   env:     CODERATCHET_ROOT, CODERATCHET_DIR, COVERAGE_LCOV""",
   )
   return 2

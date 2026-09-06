@@ -8,13 +8,14 @@ reach today, which an absolute gate never is. "JET reports zero" cannot be
 switched on for a package with 200 reports. "No file gains a report" can be
 switched on this afternoon.
 
-Five metrics today, one comparison rule:
+Six metrics today, one comparison rule:
 
 | Metric | Binds on | Context it also records | Cost |
 | --- | --- | --- | --- |
-| `Complexity()` | the **maximum** over a file's definitions, per metric | the sums | ~1 s |
+| `Complexity()` | the **maximum** over a file's definitions, and the **count above threshold** | the sums | ~1 s |
 | `Coverage()` | a file's **unexempted miss count** | relevant lines, exempted lines | ~1 s |
 | `Style()` | one count per configured house rule | nothing; every rule binds | ~1 s |
+| `Docstrings()` | a file's **undocumented public name** count | how many public names it defines | ~1 s |
 | `Boxes()` | a file's **`Core.Box`** count | nothing; the count is the whole finding | seconds |
 | `Lsp()` | a file's **reviewed** JETLS diagnostic count | the raw count | ~30 s |
 | `Inference()` | a file's **reviewed** JET report count | the raw count | minutes |
@@ -35,6 +36,16 @@ moves by 2 and would turn the gate red, and that failure is noise. A noisy gate
 gets switched off, and then it protects nothing. The sums are still recorded,
 because the maximum is blind to sprawl and the ranking job needs them.
 
+**The maximum alone leaves a hole, and the count closes it.** A file sitting at
+18 absorbs a brand new definition at 17 without moving: the maximum is
+unchanged, the gate reports PASS, and that file now has two bad definitions
+where it had one. Counting how many stand above the threshold makes the second
+one visible while staying quiet about the helper at 2. This does not make the
+threshold a pass rule, because the count is ratcheted like every other number:
+a file with five definitions above the threshold stays green at five and goes
+red at six. The threshold decides what counts as bad; the ratchet still decides
+what fails.
+
 **Coverage binds on misses, not percentage.** The percentage rises when an
 uncovered line is deleted and when a covered one is added, so a file can
 improve its percentage while gaining misses. The miss count is the number that
@@ -51,7 +62,7 @@ not a defect, so an absolute gate on one is unadoptable the day it is written:
 the rules most worth holding are the ones the codebase already breaks. Adding a
 rule to such a repository turns every offending file red at once, because a
 number absent from the baseline reads as zero, and the first
-`refresh --accept-rise` writes the debt down in a diff a reviewer can size.
+`refresh --accept-change` writes the debt down in a diff a reviewer can size.
 Named syntax-tree rules come first and a regex escape hatch second: a regex
 that has to know Julia syntax is a regex that is wrong on the case you have not
 thought of yet.
@@ -70,6 +81,13 @@ false, against the habit the flag invites: skipping the full analysis leaves
 JETLS without the module a file belongs to, so its imports read as unused and
 its macros read as undefined. Measured on a nine-file package, the flag turned
 seven real diagnostics into fourteen mostly false ones.
+
+**Docstring coverage binds on undocumented names, not on a ratio.** A ratio
+rises when a public name is deleted, and a documented count rises when a
+private helper is exported. The undocumented count has a reachable zero and
+moves the right way on its own. Public means *declared* public: an `export`, a
+`public`, or a `@public` macro. A name nothing declares is internal, and the
+rule most repositories actually hold is about the interface.
 
 **Thresholds are not the pass rule.** The ratchet stops decay; driving
 improvement is a separate, paced job. A file far above every threshold stays
@@ -188,12 +206,13 @@ COVERAGE_LCOV=lcov.info julia --project=code_ratchet \
 ```sh
 coderatchet complexity check              # exit 1 if any binding number rose
 coderatchet complexity refresh            # refuses if a number rose
-coderatchet complexity refresh --accept-rise   # record a worse number, deliberately
+coderatchet complexity refresh --accept-change # record a worse number, deliberately
 coderatchet complexity candidates         # rank work; never gates
 coderatchet complexity triage --issues open.tsv   # plan the issues to open
 coderatchet coverage terminal             # files still short of zero misses
 coderatchet boxes methods                 # name every boxed capture, and its variable
 coderatchet lsp report                    # every undismissed JETLS diagnostic
+coderatchet docs undocumented             # every public name owing a docstring
 ```
 
 `terminal`, `candidates`, `methods` and `report` say what to *fix*; the ratchet
@@ -238,7 +257,7 @@ A failing check does three things beyond exiting 1.
 - One `::error file=…::` annotation per offending file, so the failure lands on
   the diff rather than only in a log.
 - A markdown rise table appended to `$GITHUB_STEP_SUMMARY`.
-- A **refresh artifact**: the baseline as `refresh --accept-rise` would have
+- A **refresh artifact**: the baseline as `refresh --accept-change` would have
   written it, under `<ratchet dir>/_refresh/`. Upload it from the failing run,
   and a contributor fixes a red gate by downloading the file and committing it
   at its recorded path. No Julia, no local environment.
@@ -263,6 +282,25 @@ already names is suppressed. And **the cap is on the open-issue count, not on
 this run**: a per-run cap is blind to throughput, so an unworked backlog would
 grow at a fixed rate, while capping the queue makes it pace itself to what
 actually closes.
+
+## Direction
+
+A binding number moves one way by default: **down**. Nearly every quality
+number has a complement that is also a number, and the one worth binding is the
+one with a reachable zero. Misses rather than percentage, undocumented rather
+than documented.
+
+`direction(metric, key)` can return `:up` for a quantity with no complement to
+count. The clearest case is how many assertions a test file makes: there is no
+such thing as a test not written, so the only gate available is that the number
+must not fall. Deleting tests to turn CI green is a real failure mode, and it
+is invisible to every `:down` number here. No shipped metric binds `:up` yet;
+the trait is what a metric that needs it would use.
+
+The remedy follows the direction, so a `:up` metric is told to raise its number
+rather than lower it, and a violation reads "rose" or "fell" off its own two
+values. The refresh flag is `--accept-change` for the same reason, since a
+number binding `:up` is a violation when it falls.
 
 ## Renames
 

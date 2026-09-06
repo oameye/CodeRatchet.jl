@@ -19,7 +19,7 @@ module CodeRatchet
 using JuliaSyntax: JuliaSyntax
 using TOML: TOML
 
-export Boxes, Complexity, Coverage, Lsp, Style, check, refresh
+export Boxes, Complexity, Coverage, Docstrings, Lsp, Style, check, refresh
 
 # --- what a measurement is -------------------------------------------------
 
@@ -108,6 +108,24 @@ right when the metric has no natural zero. Coverage overrides it: an added file
 enters fully covered or exempted, because there the zero is meaningful.
 """
 entry_failures(::Metric, ::AbstractString, paths, rows) = String[]
+
+"""
+    direction(metric, key) -> Symbol
+
+Which way `key` is allowed to move: `:down` (the default) or `:up`.
+
+Nearly every quality number is one whose complement is also a number, and the
+one with a reachable zero is the one to bind: misses rather than percentage,
+undocumented names rather than documented ones. Those all bind `:down`, which
+is why that is the default.
+
+`:up` is for a quantity with no complement to count. "How many tests this file
+asserts" is the clearest case: there is no such thing as a test not written, so
+the only gate available is that the number must not fall. Deleting tests to
+turn CI green is a real failure mode, and it is invisible to every `:down`
+number in this package.
+"""
+direction(::Metric, ::AbstractString) = :down
 
 """
     dismissal_section(metric) -> String
@@ -226,7 +244,8 @@ tomlvalue(v::AbstractVector) = "[" * join(map(tomlvalue, v), ", ") * "]"
 """
     Violation
 
-One binding number that rose. Carries both values, because a violation the
+One binding number that moved the wrong way. Carries both values, because a
+violation the
 reader cannot size is a violation they cannot act on.
 """
 struct Violation
@@ -236,8 +255,19 @@ struct Violation
   to::Int
 end
 
+"""
+    moved(v) -> String
+
+"rose" or "fell", read off the numbers.
+
+Taking the word from the values rather than from the metric's direction keeps
+the two from ever disagreeing: a violation that says it rose is one whose
+second number is larger, whichever direction made it a violation.
+"""
+moved(v::Violation) = v.to > v.from ? "rose" : "fell"
+
 function Base.show(io::IO, v::Violation)
-  return print(io, v.path, ": ", v.key, " rose ", v.from, " -> ", v.to)
+  return print(io, v.path, ": ", v.key, " ", moved(v), " ", v.from, " -> ", v.to)
 end
 
 """
@@ -332,7 +362,8 @@ function ratchet(metric::Metric, current::Dict{String,Row}, baseline::Dict{Strin
     was === nothing && continue
     for key in binding(metric)
       from, to = get(was, key, 0), get(current[path], key, 0)
-      to > from && push!(violations, Violation(path, key, from, to))
+      moved_wrong = direction(metric, key) === :up ? to < from : to > from
+      moved_wrong && push!(violations, Violation(path, key, from, to))
     end
   end
 
@@ -499,7 +530,7 @@ function check(
 end
 
 """
-    refresh(metric, root; dir, accept_rise) -> Report
+    refresh(metric, root; dir, accept_change) -> Report
 
 Rewrite the baseline from a fresh measurement.
 
@@ -510,10 +541,10 @@ function refresh(
   metric::Metric,
   root::AbstractString=pwd();
   dir::AbstractString=ratchet_dir(root),
-  accept_rise::Bool=false,
+  accept_change::Bool=false,
 )
   report = check(metric, root; dir)
-  if !accept_rise && !isempty(report.violations)
+  if !accept_change && !isempty(report.violations)
     error(refuse_rise(metric_name(metric), report.violations))
   end
   isempty(report.unparsable) || error(
@@ -564,6 +595,9 @@ end
     refuse_rise(kind, violations) -> String
 
 The message a refused refresh prints.
+
+"change" rather than "rise", because a number binding `:up` is a violation when
+it falls, and a message that says "rise" about a fall reads as a different bug.
 """
 function refuse_rise(kind::AbstractString, violations::Vector{Violation})
   io = IOBuffer()
@@ -571,24 +605,35 @@ function refuse_rise(kind::AbstractString, violations::Vector{Violation})
     println(io, "ERROR: ", v)
   end
   print(
-    io, "Re-run with --accept-rise to record ", length(violations), " rise(s) in $kind."
+    io, "Re-run with --accept-change to record ", length(violations), " change(s) in $kind."
   )
   return String(take!(io))
 end
 
 """
-    routes(; dismissal) -> String
+    routes(; dismissal, moves) -> String
 
 The remedy, in its ordered routes.
 
 Order matters. A refresh is the last route, not the first, and naming it first
 would make it the reflex. The dismissal route appears only for a metric that
 has one, named by `dismissal_section`.
+
+`moves` is the direction the first route asks for. A metric whose numbers all
+run one way names that way; one carrying both says neither, because "lower it"
+is wrong advice for half of them.
 """
-function routes(; dismissal::AbstractString)
+function routes(; dismissal::AbstractString, moves::Symbol=:down)
   io = IOBuffer()
   println(io, "A refresh is not the fix. Take one of these routes, in order.")
-  println(io, "  1. Lower the number.")
+  first_route = if moves === :down
+    "Lower the number."
+  elseif moves === :up
+    "Raise the number."
+  else
+    "Move the number back."
+  end
+  println(io, "  1. ", first_route)
   n = 2
   if !isempty(dismissal)
     println(
@@ -596,9 +641,20 @@ function routes(; dismissal::AbstractString)
     )
     n = 3
   end
-  println(io, "  $n. Record the rise deliberately, with `refresh --accept-rise`.")
+  println(io, "  $n. Record the change deliberately, with `refresh --accept-change`.")
   print(io, "     In CI, take the baseline from this run's refresh artifact and commit it.")
   return String(take!(io))
+end
+
+"""
+    advised_move(metric) -> Symbol
+
+The direction to name in the remedy: `:down`, `:up`, or `:mixed` when the
+metric's binding numbers do not agree.
+"""
+function advised_move(metric::Metric)
+  ways = unique(direction(metric, key) for key in binding(metric))
+  return length(ways) == 1 ? only(ways) : :mixed
 end
 
 # --- reporting --------------------------------------------------------------
@@ -636,14 +692,16 @@ end
     rise_table(violations) -> String
 
 The markdown table for the step summary. It names every offending file,
-including one whose number rose for a reason absent from the diff.
+including one whose number moved for a reason absent from the diff.
 """
 function rise_table(violations::Vector{Violation})
   io = IOBuffer()
-  println(io, "| file | metric | baseline | now |")
-  println(io, "| --- | --- | --- | --- |")
+  println(io, "| file | metric | baseline | now | moved |")
+  println(io, "| --- | --- | --- | --- | --- |")
   for v in violations
-    println(io, "| ", v.path, " | ", v.key, " | ", v.from, " | ", v.to, " |")
+    println(
+      io, "| ", v.path, " | ", v.key, " | ", v.from, " | ", v.to, " | ", moved(v), " |"
+    )
   end
   return String(take!(io))
 end
@@ -653,7 +711,7 @@ const ARTIFACT_DIR = "_refresh"
 """
     write_artifact(metric, root, dir) -> String
 
-Write the baseline as `refresh --accept-rise` would write it, for upload from a
+Write the baseline as `refresh --accept-change` would write it, for upload from a
 failing CI run.
 
 The point is that a contributor fixes a red gate by downloading a file and
@@ -678,7 +736,7 @@ function Base.show(io::IO, report::Report)
         println(io, "    ", item)
       end
     end
-  section("rose", report.violations)
+  section("moved", report.violations)
   section("do not parse", report.unparsable)
   section("measured by nothing", report.unscoped)
   section("no baseline row", report.missing_rows)
@@ -698,6 +756,7 @@ include("complexity.jl")
 include("coverage.jl")
 include("style.jl")
 include("boxes.jl")
+include("docs.jl")
 include("lsp.jl")
 include("triage.jl")
 include("cli.jl")

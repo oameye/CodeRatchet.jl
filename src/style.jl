@@ -52,7 +52,7 @@ House-rule counts per file, one binding number per rule.
 
 Adding a rule to a repository that already breaks it turns the gate red on
 every offending file at once, because a number absent from the baseline reads
-as zero. That is the intended shape: the first `refresh --accept-rise` after
+as zero. That is the intended shape: the first `refresh --accept-change` after
 adding a rule writes the debt down explicitly, in a diff a reviewer can size.
 """
 struct Style <: Metric

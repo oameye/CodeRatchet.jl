@@ -389,7 +389,7 @@ reason = "Test code."
 
     @testset "refresh refuses a rise without the flag" begin
       @test_throws ErrorException refresh(Complexity(), root)
-      report = refresh(Complexity(), root; accept_rise=true)
+      report = refresh(Complexity(), root; accept_change=true)
       @test !isempty(report.violations)
       @test ok(check(Complexity(), root))
     end
@@ -424,7 +424,93 @@ reason = "Test code."
     @testset "provenance is recorded with a commit that never binds" begin
       text = render_baseline(Complexity(), measure(Complexity(), root), root)
       @test occursin("commit = ", text)
-      @test occursin("aggregation = \"max_over_definitions\"", text)
+      @test occursin("aggregation = \"max_and_count_over_threshold\"", text)
+    end
+  end
+
+  # The hole the count of definitions above threshold closes. Binding on the
+  # maximum alone, a file already standing at its worst absorbs a second bad
+  # definition without moving: the maximum is unchanged, and the gate reports
+  # PASS on a file that now has two problems where it had one.
+  @testset "definitions above threshold" begin
+    WIDE = """
+    function wide(x)
+      if x > 6; return 1
+      elseif x > 5; return 2
+      elseif x > 4; return 3
+      elseif x > 3; return 4
+      elseif x > 2; return 5
+      else; return 6
+      end
+    end
+    """
+    MIDDLING = """
+    function middling(x)
+      if x > 2; return 1
+      elseif x > 1; return 2
+      else; return 3
+      end
+    end
+    """
+    LOW_BAR = "[scope]\nmeasure = [\"src/\"]\n\n[thresholds]\ncyclomatic = 2\n"
+
+    root = gitrepo(Dict("src/a.jl" => WIDE); rulings=LOW_BAR)
+    refresh(Complexity(), root)
+
+    @testset "one bad definition is one" begin
+      row = measure(Complexity(), root)["src/a.jl"]
+      @test row["cyc"] == 6
+      @test row["cyc_over"] == 1
+    end
+
+    @testset "a second one fails, though the maximum does not move" begin
+      # cyc 3: strictly below the maximum of 6, strictly above the threshold
+      # of 2. The old gate saw nothing here at all.
+      track!(root, "src/a.jl", WIDE * MIDDLING)
+      row = measure(Complexity(), root)["src/a.jl"]
+      @test row["cyc"] == 6
+      @test row["cyc_over"] == 2
+
+      report = check(Complexity(), root)
+      @test !ok(report)
+      @test any(v -> v.key == "cyc_over" && v.from == 1 && v.to == 2, report.violations)
+      @test !any(v -> v.key == "cyc", report.violations)
+    end
+
+    @testset "a helper below the threshold still moves nothing" begin
+      refresh(Complexity(), root; accept_change=true)
+      track!(root, "src/a.jl", WIDE * MIDDLING * "quiet(y) = y + 1\n")
+      @test ok(check(Complexity(), root))
+    end
+
+    # The count is ratcheted like every other number here, so the threshold
+    # decides what counts as bad and the ratchet still decides what fails.
+    @testset "a file already above the threshold stays green while it holds" begin
+      @test measure(Complexity(), root)["src/a.jl"]["cyc_over"] == 2
+      @test ok(check(Complexity(), root))
+    end
+
+    @testset "an unset threshold counts nothing, rather than counting everything" begin
+      bare = gitrepo(Dict("src/a.jl" => WIDE); rulings="[scope]\nmeasure = [\"src/\"]\n")
+      row = measure(Complexity(), bare)["src/a.jl"]
+      @test row["cyc"] == 6
+      @test row["cyc_over"] == 0
+    end
+
+    @testset "an older baseline fails provenance, not with a wall of violations" begin
+      stale = gitrepo(Dict("src/a.jl" => WIDE); rulings=LOW_BAR)
+      refresh(Complexity(), stale)
+      path = joinpath(ratchet_dir(stale), "complexity_baseline.toml")
+      write(
+        path,
+        replace(
+          read(path, String), "max_and_count_over_threshold" => "max_over_definitions"
+        ),
+      )
+      report = check(Complexity(), stale)
+      @test !ok(report)
+      @test isempty(report.violations)
+      @test any(r -> occursin("provenance moved", r), report.rulings)
     end
   end
 
@@ -667,11 +753,68 @@ reason = "Test code."
     end
   end
 
+  @testset "direction" begin
+    # A number with no complement to count: there is no such thing as a test
+    # not written, so the only gate available is that it must not fall.
+    struct Rising <: CodeRatchet.Metric end
+    CodeRatchet.metric_name(::Rising) = "rising"
+    CodeRatchet.binding(::Rising) = ("asserts",)
+    CodeRatchet.row_numbers(::Rising) = ("asserts",)
+    CodeRatchet.direction(::Rising, ::AbstractString) = :up
+
+    base = Dict("a.jl" => Row(Dict("asserts" => 10)))
+
+    @testset "an upward number falling is a violation" begin
+      v, _, _, _ = ratchet(Rising(), Dict("a.jl" => Row(Dict("asserts" => 9))), base)
+      @test length(v) == 1
+      @test only(v).from == 10
+      @test only(v).to == 9
+    end
+
+    @testset "an upward number rising is quiet" begin
+      v, _, _, _ = ratchet(Rising(), Dict("a.jl" => Row(Dict("asserts" => 40))), base)
+      @test isempty(v)
+    end
+
+    @testset "holding steady is quiet either way" begin
+      v, _, _, _ = ratchet(Rising(), Dict("a.jl" => Row(Dict("asserts" => 10))), base)
+      @test isempty(v)
+    end
+
+    @testset "down is the default, so every shipped metric keeps it" begin
+      for metric in (Complexity(), Coverage(), Boxes(), Docstrings(), Lsp())
+        @test all(k -> CodeRatchet.direction(metric, k) === :down, binding(metric))
+        @test CodeRatchet.advised_move(metric) === :down
+      end
+    end
+
+    @testset "a metric carrying both directions advises neither" begin
+      struct Mixed <: CodeRatchet.Metric end
+      CodeRatchet.metric_name(::Mixed) = "mixed"
+      CodeRatchet.binding(::Mixed) = ("up", "down")
+      CodeRatchet.row_numbers(::Mixed) = ("up", "down")
+      CodeRatchet.direction(::Mixed, key::AbstractString) = key == "up" ? :up : :down
+      @test CodeRatchet.advised_move(Mixed()) === :mixed
+      @test CodeRatchet.advised_move(Rising()) === :up
+    end
+  end
+
   @testset "reporting" begin
     @testset "the remedy names a refresh last, not first" begin
       text = routes(; dismissal="")
       @test occursin("A refresh is not the fix", text)
-      @test findfirst("Lower the number", text)[1] < findfirst("Record the rise", text)[1]
+      @test findfirst("Lower the number", text)[1] < findfirst("Record the change", text)[1]
+    end
+
+    @testset "the remedy names the direction the metric actually moves" begin
+      @test occursin("Lower the number", routes(; dismissal="", moves=:down))
+      @test occursin("Raise the number", routes(; dismissal="", moves=:up))
+      @test occursin("Move the number back", routes(; dismissal="", moves=:mixed))
+    end
+
+    @testset "a violation says which way it went, read off its own numbers" begin
+      @test occursin("rose 4 -> 11", sprint(show, Violation("src/a.jl", "cyc", 4, 11)))
+      @test occursin("fell 11 -> 4", sprint(show, Violation("src/a.jl", "n", 11, 4)))
     end
 
     @testset "the dismissal route appears only where the metric has one" begin
@@ -721,6 +864,7 @@ reason = "Test code."
   end
 
   include("style_metric.jl")
+  include("docs_metric.jl")
   include("boxes_metric.jl")
   include("lsp_metric.jl")
   include("jet_metric.jl")

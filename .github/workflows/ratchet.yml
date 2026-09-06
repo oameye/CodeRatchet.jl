@@ -34,6 +34,18 @@ on:
         description: 'Install the jetls binary. Needed only by the lsp metric.'
         type: boolean
         default: false
+      jetls-rev:
+        description: >-
+          Which JETLS revision to install. PIN THIS to a commit. `release` is a
+          moving branch, and JETLS adds diagnostics between releases, so an
+          unpinned tool changes the numbers under a baseline nobody touched and
+          the gate goes red for a reason no contributor caused. The lsp metric
+          records the tool version in provenance and refuses to compare across
+          versions, so an unpinned rev turns into a red gate rather than a
+          wrong answer, but a red gate nobody caused is how a gate gets
+          switched off.
+        type: string
+        default: 'release'
       timeout-minutes:
         description: 'Cap on the whole job. JET and JETLS are the slow parts.'
         type: number
@@ -56,7 +68,7 @@ jobs:
       - name: Install jetls
         if: ${{ inputs.install-jetls }}
         run: |
-          julia -e 'using Pkg; Pkg.Apps.add(; url="https://github.com/aviatesk/JETLS.jl", rev="release")'
+          julia -e 'using Pkg; Pkg.Apps.add(; url="https://github.com/aviatesk/JETLS.jl", rev="${{ inputs.jetls-rev }}")'
           echo "$HOME/.julia/bin" >> "$GITHUB_PATH"
 
       - name: Instantiate the ratchet environment

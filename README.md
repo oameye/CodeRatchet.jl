@@ -132,6 +132,7 @@ jobs:
     with:
       julia-version: '1.12'
       install-jetls: true              # only if you run the lsp metric
+      jetls-rev: '6893fcef26...'       # pin it; `release` moves under you
       metrics: 'complexity style docs' # optional: narrow, never widen
 ```
 

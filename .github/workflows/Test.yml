@@ -45,5 +45,11 @@ jobs:
       - uses: julia-actions/setup-julia@v2
         with:
           version: '1'
-      - run: julia -e 'using Pkg; Pkg.Apps.add("JuliaFormatter")'
-      - run: ~/.julia/bin/jlfmt --check .
+      # Pkg.Apps.add, which is how the formatter is installed locally, cannot
+      # resolve a name on a runner with no registry cloned yet. Plain Pkg.add
+      # installs the registry as a side effect, so the package API is used
+      # rather than the `jlfmt` binary.
+      - run: julia -e 'using Pkg; Pkg.add(name="JuliaFormatter", version="2")'
+      - name: Check formatting
+        run: |
+          julia -e 'using JuliaFormatter; exit(format(".", overwrite=false) ? 0 : 1)'

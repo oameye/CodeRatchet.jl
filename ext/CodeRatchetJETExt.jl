@@ -62,6 +62,7 @@ function CodeRatchet.provenance(::Inference, root::AbstractString)
     "attribution" => "deepest_repository_frame",
     "package" => settings.package,
     "load_set" => sort(settings.load),
+    "commit" => CodeRatchet.short_commit(root),
   )
 end
 

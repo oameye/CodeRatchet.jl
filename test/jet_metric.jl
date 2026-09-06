@@ -148,6 +148,26 @@ end
     @test isempty(settings.load)
   end
 
+  @testset "provenance records the commit and the load set" begin
+    repo = mktempdir()
+    mkpath(joinpath(repo, "code_ratchet"))
+    write(
+      joinpath(repo, "code_ratchet/rulings.toml"),
+      """
+      [scope]
+      measure = ["src/"]
+
+      [jet]
+      package = "Thing"
+      load = ["B", "A"]
+      """,
+    )
+    prov = CodeRatchet.provenance(EXT.Inference(), repo)
+    @test prov["package"] == "Thing"
+    @test prov["load_set"] == ["A", "B"]   # sorted, so the order cannot drift
+    @test haskey(prov, "commit")
+  end
+
   @testset "the metric's shape" begin
     metric = EXT.Inference()
     @test CodeRatchet.metric_name(metric) == "jet"

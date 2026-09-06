@@ -357,7 +357,12 @@ The commit a baseline was taken at, for a reader. Never compared.
 """
 function short_commit(root::AbstractString)
   try
-    return strip(read(Cmd(`git rev-parse --short HEAD`; dir=root), String))
+    # git's stderr is swallowed rather than shown: outside a working tree this
+    # falls back to "unknown" on purpose, and a `fatal:` line in the log would
+    # read as a failure when nothing failed.
+    return strip(
+      read(pipeline(Cmd(`git rev-parse --short HEAD`; dir=root); stderr=devnull), String)
+    )
   catch
     return "unknown"
   end

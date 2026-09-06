@@ -23,6 +23,13 @@ on:
         description: 'Where rulings.toml and the baselines live.'
         type: string
         default: 'code_ratchet'
+      metrics:
+        description: >-
+          Comma-separated subset of [metrics].run to check, for a repository
+          whose CI already gates one of them elsewhere. It can only narrow that
+          list, never add to it. Empty runs everything configured.
+        type: string
+        default: ''
       install-jetls:
         description: 'Install the jetls binary. Needed only by the lsp metric.'
         type: boolean
@@ -60,9 +67,11 @@ jobs:
       # metric costs a little time and breaks nothing.
       - name: Check every configured gate
         run: |
+          ONLY=""
+          if [ -n "${{ inputs.metrics }}" ]; then ONLY="--only ${{ inputs.metrics }}"; fi
           julia --project=${{ inputs.ratchet-dir }} \
             -e 'using CodeRatchet; try; @eval using JET; catch; end; exit(CodeRatchet.main())' \
-            all check
+            all check $ONLY
 
       # The point of the artifact: a contributor fixes a red gate by
       # downloading this and committing it, with no Julia and no local setup.

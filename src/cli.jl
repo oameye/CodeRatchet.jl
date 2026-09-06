@@ -68,8 +68,12 @@ the answer to "did it pass" should not need re-reading.
 function do_group(root::AbstractString, args)
   dir = ratchet_dir(root)
   verb = isempty(args) ? "check" : args[1]
+  only = String[]
+  for (i, flag) in enumerate(args)
+    flag == "--only" && i < length(args) && (only = split(args[i + 1], ","))
+  end
   metrics = try
-    configured_metrics(root; dir)
+    configured_metrics(root; dir, only)
   catch err
     println(stderr, sprint(showerror, err))
     return 1
@@ -303,7 +307,7 @@ function usage()
     """
 usage: coderatchet <metric> <verb> [flags]
          coderatchet init [--force]
-         coderatchet all [check | refresh | scorecard]
+         coderatchet all [check | refresh | scorecard] [--only a,b]
   metrics: complexity | coverage | style | docs | boxes | lsp | jet
   verbs:   check
            refresh [--accept-change]

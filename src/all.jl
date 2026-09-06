@@ -5,6 +5,11 @@ The Makefile of the first repository to adopt this listed five commands, and a
 sixth was one refresh away from being forgotten. A list of commands in a
 Makefile is a second place the set of gates is written down, and the two drift.
 `[metrics].run` in `rulings.toml` is the one place, and everything reads it.
+
+`--only` narrows that set for one run and can never widen it. Narrowing is a
+legitimate thing to want: a repository whose JET is already gated absolutely by
+another workflow should not pay for JET twice in CI. Widening would be a second
+source of truth, so it is refused.
 """
 
 """
@@ -24,7 +29,9 @@ An absent or empty list is an error rather than a run of nothing. A gate that
 measures nothing and reports PASS is the worst outcome available, because it
 reads as evidence.
 """
-function configured_metrics(root::AbstractString; dir::AbstractString=ratchet_dir(root))
+function configured_metrics(
+  root::AbstractString; dir::AbstractString=ratchet_dir(root), only=String[]
+)
   rulings = read_rulings(dir)
   names = String[
     String(n) for n in get(get(rulings.raw, "metrics", Dict()), "run", String[])
@@ -40,6 +47,16 @@ function configured_metrics(root::AbstractString; dir::AbstractString=ratchet_di
     ". Known metrics: " *
     join(METRIC_ORDER, ", "),
   )
+
+  if !isempty(only)
+    stray = setdiff(only, names)
+    isempty(stray) || error(
+      "--only names metric(s) that [metrics].run does not: " *
+      join(sort(collect(stray)), ", ") *
+      ". It narrows the configured set; it cannot add to it.",
+    )
+    names = collect(intersect(names, only))
+  end
   return Metric[metric_from(n, root) for n in METRIC_ORDER if n in names]
 end
 

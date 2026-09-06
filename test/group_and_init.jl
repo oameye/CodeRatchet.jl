@@ -54,6 +54,24 @@ rules = ["union_nothing"]
     @test_throws ErrorException configured_metrics(root)
   end
 
+  # A repository whose JET is already gated absolutely by another workflow
+  # should not pay for JET twice in CI. Narrowing is legitimate; widening would
+  # be a second source of truth.
+  @testset "--only narrows the configured set" begin
+    root = gitrepo(Dict("src/a.jl" => "f(x) = x"); rulings=THREE)
+    @test [metric_name(m) for m in configured_metrics(root; only=["style", "docs"])] == ["style", "docs"]
+  end
+
+  @testset "--only cannot add a metric the repository did not configure" begin
+    root = gitrepo(Dict("src/a.jl" => "f(x) = x"); rulings=THREE)
+    @test_throws ErrorException configured_metrics(root; only=["jet"])
+  end
+
+  @testset "--only keeps cost order, not the order it was written in" begin
+    root = gitrepo(Dict("src/a.jl" => "f(x) = x"); rulings=THREE)
+    @test [metric_name(m) for m in configured_metrics(root; only=["docs", "complexity"])] == ["complexity", "docs"]
+  end
+
   @testset "the group verb exits nonzero when any single gate fails" begin
     root = gitrepo(Dict("src/a.jl" => "f(x) = x\n"); rulings=THREE)
     withenv("CODERATCHET_ROOT" => root) do

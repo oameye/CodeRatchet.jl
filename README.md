@@ -131,11 +131,17 @@ jobs:
     uses: oameye/CodeRatchet.jl/.github/workflows/ratchet.yml@main
     with:
       julia-version: '1.12'
-      install-jetls: true      # only if you run the lsp metric
+      install-jetls: true              # only if you run the lsp metric
+      metrics: 'complexity style docs' # optional: narrow, never widen
 ```
 
 Calling the workflow rather than copying it means the gate's CI behaviour has
 one definition. Forty copies drift; one call does not.
+
+`metrics` narrows `[metrics].run` for that job and can never add to it.
+Narrowing is a legitimate thing to want: a repository whose JET is already
+gated absolutely by another workflow should not pay for JET twice. Widening
+would be a second source of truth, so it is refused.
 
 ### By hand
 

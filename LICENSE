@@ -36,11 +36,24 @@ Specifically adapted from that work: binding complexity on the maximum over a
 file's definitions rather than the sum; binding coverage on the miss count
 rather than the percentage; binding JET on a reviewed count with named
 dismissals; keeping thresholds out of the pass rule; checking parseability
-separately; pairing renames on a row's full number set; splitting measured
-baselines from hand-written rulings; the `rulings.toml` section structure; the
-unmeasured-path assertion; deepest-repository-frame attribution; pinning the
-JET load set in provenance; and the check / refresh / refresh --accept-rise
-verbs.
+separately; pairing renames on a row's full number set, and the argument that
+equal numbers make the pairing safe; splitting measured baselines from
+hand-written rulings; the `rulings.toml` section structure; the unmeasured-path
+assertion; deepest-repository-frame attribution; pinning the JET load set in
+provenance; and the check / refresh / refresh --accept-rise verbs.
+
+Adapted in a second pass, after reading his implementation rather than only its
+rationale comments: the set-equality rule that makes a file with no baseline row
+a failure; attributing a coverage miss to the top-level definition holding it,
+including the `Core.@doc` unwrapping that makes a documented definition name
+itself; holding a coverage exemption to its exact count in both directions, and
+the argument that a claim below the truth is a leak the file total cannot see;
+excluding `commit` from the provenance comparison; taking the file list from
+`git ls-files` rather than a directory walk, and why; the `::error` annotations
+and step-summary table; the refresh artifact, so a contributor fixes a red gate
+by committing a downloaded file; the ordered remedy routes that name a refresh
+last; and capping the scheduled job on the open-issue count rather than per run,
+with the whole-token title match that decides what is already filed.
 
 Several docstrings in this package paraphrase the rationale comments in that
 work closely enough to be considered derived text, not independent authorship.

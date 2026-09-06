@@ -4,56 +4,134 @@
 Command-line entry point. Returns the process exit code, so a caller decides
 whether to `exit`.
 
-    julia --project=code_ratchet -e 'using CodeRatchet; exit(CodeRatchet.main())' \\
-        complexity check
+    julia --project=code_ratchet \\
+      -e 'using CodeRatchet; exit(CodeRatchet.main())' complexity check
 
-Verbs: `check`, `refresh`, `refresh --accept-rise`, and `candidates` for the
-metrics that rank work.
+In CI a failing check emits one `::error` annotation per offending file, writes
+a rise table to the step summary, and stages a **refresh artifact**: the
+baseline as `refresh --accept-rise` would have written it. A contributor fixes
+a red gate by downloading that file and committing it at its recorded path,
+with no Julia and no local environment.
 """
 function main(args::AbstractVector{<:AbstractString}=ARGS)
-  length(args) >= 2 || return usage()
+  length(args) >= 2 && return dispatch(args)
+  return usage()
+end
+
+function dispatch(args)
   metric = metric_from(args[1])
   metric === nothing && return usage("unknown metric $(repr(args[1]))")
-  verb = args[2]
-  flags = args[3:end]
+  verb, flags = args[2], args[3:end]
   root = get(ENV, "CODERATCHET_ROOT", pwd())
+  dir = ratchet_dir(root)
 
-  if verb == "check"
-    report = check(metric, root)
-    print(report)
-    extra = metric isa Coverage ? stale_exemptions(root) : String[]
-    for line in extra
-      println("  stale ruling: ", line)
-    end
-    return (ok(report) && isempty(extra)) ? 0 : 1
-  elseif verb == "refresh"
-    accept = "--accept-rise" in flags
-    try
-      report = refresh(metric, root; accept_rise=accept)
-      println("wrote ", baseline_path(metric, ratchet_dir(root)))
-      accept &&
-        !isempty(report.violations) &&
-        println("  accepted ", length(report.violations), " rise(s) deliberately")
-      return 0
-    catch err
-      println(stderr, sprint(showerror, err))
-      return 1
-    end
-  elseif verb == "candidates"
-    metric isa Complexity || return usage("candidates is complexity-only")
-    found = candidates(root)
-    isempty(found) && (println("nothing above threshold"); return 0)
-    println(length(found), " definition(s) above threshold, worst first:")
-    for definition in found
-      println("  ", definition)
-    end
-    return 0
-  end
+  verb == "check" && return do_check(metric, root, dir)
+  verb == "refresh" && return do_refresh(metric, root, dir, "--accept-rise" in flags)
+  verb == "candidates" && return do_candidates(metric, root, dir)
+  verb == "triage" && return do_triage(metric, root, dir, flags)
+  verb == "terminal" && return do_terminal(metric, root, dir)
   return usage("unknown verb $(repr(verb))")
 end
 
-metric_from(name::AbstractString) =
-  if name == "complexity"
+function do_check(metric::Metric, root::AbstractString, dir::AbstractString)
+  report = check(metric, root; dir)
+  print(report)
+  ok(report) && return 0
+
+  for v in report.violations
+    annotate(
+      v.path, "$(v.key) rose $(v.from) -> $(v.to); the ratchet holds it at $(v.from)."
+    )
+  end
+  for path in report.unparsable
+    annotate(path, "does not parse, so its numbers are meaningless.")
+  end
+  for path in report.unscoped
+    annotate(
+      path, "is measured by nothing. Put it in [scope] or name an [[unmeasured_path]]."
+    )
+  end
+  for path in report.missing_rows
+    annotate(path, "has no baseline row. Refresh in the same change that added it.")
+  end
+
+  if !isempty(report.violations)
+    step_summary("### CodeRatchet $(report.metric)\n\n" * rise_table(report.violations))
+  end
+  println()
+  println(routes(; dismissal=metric_name(metric) == "jet"))
+
+  # A provenance mismatch means the numbers came from a different tool, so an
+  # artifact built from them would be the wrong file to commit.
+  if isempty(report.rulings)
+    try
+      println("\nRefresh artifact: ", write_artifact(metric, root, dir))
+    catch err
+      println(stderr, "\nNo refresh artifact: ", sprint(showerror, err))
+    end
+  else
+    println("\nNo refresh artifact: fix the rulings above first.")
+  end
+  return 1
+end
+
+function do_refresh(metric::Metric, root::AbstractString, dir::AbstractString, accept::Bool)
+  try
+    report = refresh(metric, root; dir, accept_rise=accept)
+    println("wrote ", baseline_path(metric, dir))
+    accept &&
+      !isempty(report.violations) &&
+      println("  recorded ", length(report.violations), " rise(s) deliberately")
+    return 0
+  catch err
+    println(stderr, sprint(showerror, err))
+    println(stderr)
+    println(stderr, routes(; dismissal=metric_name(metric) == "jet"))
+    return 1
+  end
+end
+
+function do_candidates(metric::Metric, root::AbstractString, dir::AbstractString)
+  metric isa Complexity || return usage("candidates is complexity-only")
+  found = sort(complexity_candidates(root; dir); by=c -> -c.rank)
+  isempty(found) && (println("nothing above threshold"); return 0)
+  println(length(found), " definition(s) above threshold, worst first:")
+  for c in found
+    println("  ", c)
+  end
+  return 0
+end
+
+function do_triage(metric::Metric, root::AbstractString, dir::AbstractString, flags)
+  metric isa Complexity ||
+    return usage("triage ranks across metrics; call it on `complexity`")
+  issues = ""
+  for (i, flag) in enumerate(flags)
+    flag == "--issues" && i < length(flags) && (issues = read(flags[i + 1], String))
+  end
+  plan = triage(root; issues, dir, refile_closed=("--refile-closed" in flags))
+  print(plan)
+  out = joinpath(dir, "_triage")
+  if !isempty(plan.file)
+    write_plan(plan, out)
+    println("\nwrote the plan to ", out)
+  end
+  return 0
+end
+
+function do_terminal(metric::Metric, root::AbstractString, dir::AbstractString)
+  metric isa Coverage || return usage("terminal is coverage-only")
+  short = terminal(root; dir)
+  isempty(short) && (println("every file in scope is fully covered"); return 0)
+  println(length(short), " file(s) short of zero misses, worst first:")
+  for line in short
+    println("  ", line)
+  end
+  return 0
+end
+
+function metric_from(name::AbstractString)
+  return if name == "complexity"
     Complexity()
   elseif name == "coverage"
     Coverage()
@@ -62,6 +140,7 @@ metric_from(name::AbstractString) =
   else
     nothing
   end
+end
 
 """
     jet_metric()
@@ -87,7 +166,9 @@ usage: coderatchet <metric> <verb> [flags]
   metrics: complexity | coverage | jet
   verbs:   check
            refresh [--accept-rise]
-           candidates            (complexity only)
+           candidates                        (complexity only)
+           triage [--issues FILE] [--refile-closed]
+           terminal                          (coverage only)
   env:     CODERATCHET_ROOT, CODERATCHET_DIR, COVERAGE_LCOV""",
   )
   return 2

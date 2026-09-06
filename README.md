@@ -84,6 +84,7 @@ reason = "Test code. Its complexity is not the package's."
 
 [[exemption]]                        # coverage only
 path = "src/precompile.jl"
+definition = "warmup"                # or "<toplevel>" for a const or include
 misses = 4
 reason = "The workload body never runs under the test process."
 
@@ -116,9 +117,11 @@ COVERAGE_LCOV=lcov.info julia --project=code_ratchet \
 
 ```sh
 coderatchet complexity check              # exit 1 if any binding number rose
-coderatchet complexity candidates         # rank work; never gates
 coderatchet complexity refresh            # refuses if a number rose
 coderatchet complexity refresh --accept-rise   # record a worse number, deliberately
+coderatchet complexity candidates         # rank work; never gates
+coderatchet complexity triage --issues open.tsv   # plan the issues to open
+coderatchet coverage terminal             # files still short of zero misses
 ```
 
 where `coderatchet` is
@@ -128,6 +131,62 @@ a package extension.
 
 Environment: `CODERATCHET_ROOT` (repository root, default `pwd()`),
 `CODERATCHET_DIR` (default `<root>/code_ratchet`), `COVERAGE_LCOV`.
+
+## What turns the gate red
+
+A rise in a binding number is the obvious one. These are the rest, and each
+closes a way the gate could otherwise be quietly wrong.
+
+- **A file in scope with no baseline row.** Without this a new file passes at
+  any number at all until some later refresh bakes it in silently. Demanding
+  the row puts the number in the diff of the change that introduced it.
+- **A baseline row naming no file.** The same failure from the other side.
+- **A tracked `.jl` file that is neither in scope nor declared unmeasured.** A
+  new top-level directory cannot fall through unmeasured and silent.
+- **A file that does not parse.**
+- **An exemption whose count does not match the truth**, in either direction. A
+  claim above the truth is stale. A claim below it is a leak the file total
+  cannot see, because a line covered elsewhere in the file pays for a new
+  uncovered line inside the exempted definition and the file's miss count stays
+  flat.
+- **Provenance that moved under the baseline.** The numbers came from a
+  different tool, so comparing them at all would be meaningless.
+
+The first run, with no baseline, is the bootstrap case and reports none of
+these. `refresh` and it becomes the tree the ratchet holds.
+
+## In CI
+
+A failing check does three things beyond exiting 1.
+
+- One `::error file=…::` annotation per offending file, so the failure lands on
+  the diff rather than only in a log.
+- A markdown rise table appended to `$GITHUB_STEP_SUMMARY`.
+- A **refresh artifact**: the baseline as `refresh --accept-rise` would have
+  written it, under `<ratchet dir>/_refresh/`. Upload it from the failing run,
+  and a contributor fixes a red gate by downloading the file and committing it
+  at its recorded path. No Julia, no local environment.
+
+A provenance failure suppresses the artifact, because a baseline built from the
+wrong tool is the wrong file to commit.
+
+## Driving improvement
+
+The ratchet stops decay and says nothing about getting better. `triage` is the
+other half: it ranks what stands above threshold, drops what the tracker
+already names, and writes a plan of issues to open under
+`<ratchet dir>/_triage/` as `NNN-title` and `NNN-body` pairs.
+
+It opens nothing and reads no issue body. Feed it `gh issue list` output as
+`number<TAB>state<TAB>title` and let `gh` create what the plan names, so every
+decision lives in one place a person can run and read.
+
+Three rules decide the plan. One issue per file rather than per definition,
+because a file with four breaches is one piece of work. A file the tracker
+already names is suppressed. And **the cap is on the open-issue count, not on
+this run**: a per-run cap is blind to throughput, so an unworked backlog would
+grow at a fixed rate, while capping the queue makes it pace itself to what
+actually closes.
 
 ## Renames
 
@@ -170,7 +229,12 @@ post](https://discourse.julialang.org/t/idiomatic-julia-code-in-ai-generated-cod
 
 **Every binding decision documented above is his**, and several docstrings in
 this package paraphrase his rationale comments closely enough to be derived
-text rather than independent authorship. See `LICENSE` for the notice.
+text rather than independent authorship. A second pass, after reading his
+implementation rather than only its rationale, took the set-equality rule, the
+per-definition coverage attribution, the two-directional exemption check, the
+`git ls-files` file list, the CI annotations and refresh artifact, the ordered
+remedy routes, and the open-queue cap on the scheduled job. `LICENSE` itemises
+all of it.
 
 What differs here is packaging, not insight. His version is three standalone
 scripts per repository, each of which has to be included into a module of its

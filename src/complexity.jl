@@ -34,21 +34,13 @@ metric_name(::Complexity) = "complexity"
 binding(::Complexity) = ("cyc", "cog", "arg")
 row_numbers(::Complexity) = ("cyc", "cog", "arg", "cyc_sum", "cog_sum", "arg_sum")
 
-function provenance(::Complexity, ::AbstractString)
+function provenance(::Complexity, root::AbstractString)
   return Dict{String,Any}(
     "metric" => "complexity",
     "tool" => "CodeComplexity",
     "aggregation" => "max_over_definitions",
+    "commit" => short_commit(root),
   )
-end
-
-"""
-    scoped_files(root, scope) -> Vector{String}
-
-Tracked `.jl` files inside the measured scope, repository-relative.
-"""
-function scoped_files(root::AbstractString, scope)
-  return [p for p in tracked_julia_files(root) if in_scope(p, scope)]
 end
 
 function measure(metric::Complexity, root::AbstractString)
@@ -65,47 +57,4 @@ function measure(metric::Complexity, root::AbstractString)
     rows[rel] = Row(numbers)
   end
   return rows
-end
-
-"""
-    Definition
-
-One definition and its measured value, for ranking work rather than gating it.
-"""
-struct Definition
-  path::String
-  name::String
-  line::Int
-  key::String
-  value::Int
-end
-
-function Base.show(io::IO, d::Definition)
-  return print(io, d.path, ":", d.line, " ", d.name, " ", d.key, "=", d.value)
-end
-
-"""
-    candidates(root; dir) -> Vector{Definition}
-
-Definitions standing above their threshold in `rulings.toml`, worst first.
-
-Thresholds are deliberately kept out of the pass rule. The ratchet stops
-decay; driving improvement is a separate, paced job. So a file far above every
-threshold stays green while its numbers hold steady, and shows up here instead.
-"""
-function candidates(root::AbstractString=pwd(); dir::AbstractString=ratchet_dir(root))
-  rulings = read_rulings(dir)
-  names = Dict("cyc" => "cyclomatic", "cog" => "cognitive", "arg" => "argcount")
-  found = Definition[]
-  for rel in scoped_files(root, rulings.scope)
-    for (key, cc) in COMPLEXITY_METRICS
-      threshold = get(rulings.thresholds, names[key], typemax(Int))
-      for fn in measure_file(cc, joinpath(root, rel)).functions
-        fn.value > threshold &&
-          push!(found, Definition(rel, String(fn.name), fn.line, key, fn.value))
-      end
-    end
-  end
-  sort!(found; by=d -> -d.value)
-  return found
 end

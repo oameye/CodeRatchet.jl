@@ -369,6 +369,10 @@ end
     Report
 
 What one `check` found. `ok` is the gate's answer; everything else explains it.
+
+`held` is what the measurement still carries, per debt key, summed over files.
+It has nothing to do with whether the gate passed, and that is exactly why it
+is here: see [`held_summary`](@ref).
 """
 struct Report
   metric::String
@@ -381,6 +385,7 @@ struct Report
   rulings::Vector{String}
   renames::Dict{String,String}
   bootstrap::Bool
+  held::Dict{String,Int}
 end
 
 function ok(report::Report)
@@ -391,6 +396,43 @@ function ok(report::Report)
          isempty(report.dead_rows) &&
          isempty(report.entry) &&
          isempty(report.rulings)
+end
+
+"""
+    held_totals(metric, rows) -> Dict{String,Int}
+
+Per-key totals of the debt a measurement carries, zeros omitted.
+
+Only [`debt`](@ref) keys are summed, so a file's cyclomatic maximum does not
+appear: every non-empty file has one, and a total over maxima means nothing.
+"""
+function held_totals(metric::Metric, rows::Dict{String,Row})
+  totals = Dict{String,Int}()
+  for key in binding(metric)
+    debt(metric, key) || continue
+    n = sum((get(row, key, 0) for row in values(rows)); init=0)
+    n > 0 && (totals[key] = n)
+  end
+  return totals
+end
+
+"""
+    held_summary(report) -> String
+
+What the gate is holding, said out loud beside the verdict.
+
+A ratchet's `PASS` means *did not rise*, and the word reads as *clean*. Writing
+this package I misread my own output three times in one sitting: `boxes: PASS`
+while the baseline held three boxes, `jet: PASS` while twelve reports stood.
+Each time the numbers were already in hand and the gate declined to mention
+them. A gate that can be mistaken for a clean bill of health is worse than a
+loud one, so the verdict now always carries the debt behind it.
+"""
+function held_summary(report::Report)
+  isempty(report.held) && return "clean"
+  return "holding " * join(
+    ("$key=$(report.held[key])" for key in sort(collect(keys(report.held)))), ", "
+  )
 end
 
 """
@@ -549,6 +591,7 @@ function check(
       ruling_bad,
       Dict{String,String}(),
       true,
+      held_totals(metric, current),
     )
   end
 
@@ -564,6 +607,7 @@ function check(
     vcat(ruling_bad, provenance_bad),
     Dict{String,String}(),
     false,
+    held_totals(metric, current),
   )
 
   violations, new_files, dead, renames = ratchet(metric, current, baseline)
@@ -579,6 +623,7 @@ function check(
     ruling_bad,
     renames,
     false,
+    held_totals(metric, current),
   )
 end
 
@@ -782,7 +827,15 @@ function write_artifact(metric::Metric, root::AbstractString, dir::AbstractStrin
 end
 
 function Base.show(io::IO, report::Report)
-  println(io, "CodeRatchet ", report.metric, ": ", ok(report) ? "PASS" : "FAIL")
+  println(
+    io,
+    "CodeRatchet ",
+    report.metric,
+    ": ",
+    ok(report) ? "PASS" : "FAIL",
+    ", ",
+    held_summary(report),
+  )
   report.bootstrap && println(io, "  no baseline yet; `refresh` to take one")
   section(label, items) =
     if !isempty(items)

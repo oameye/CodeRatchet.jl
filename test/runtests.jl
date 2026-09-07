@@ -799,6 +799,54 @@ reason = "Test code."
     end
   end
 
+  # A ratchet's PASS means "did not rise", and the word reads as "clean". I
+  # misread my own output three times in one sitting: boxes PASS while the
+  # baseline held three, jet PASS while twelve reports stood. The numbers were
+  # already in hand and the gate declined to mention them.
+  @testset "the verdict carries the debt behind it" begin
+    @testset "a clean gate says clean" begin
+      root = gitrepo(Dict("src/a.jl" => "plain(x) = x + 1\n"); rulings=SRC_ONLY)
+      refresh(Complexity(), root)
+      report = check(Complexity(), root)
+      @test ok(report)
+      @test CodeRatchet.held_summary(report) == "clean"
+      @test occursin("PASS, clean", sprint(show, report))
+    end
+
+    @testset "a gate holding debt says how much, while still passing" begin
+      body = """
+      function branchy(x)
+        if x > 3; return 1
+        elseif x > 2; return 2
+        elseif x > 1; return 3
+        else; return 4
+        end
+      end
+      """
+      root = gitrepo(Dict("src/a.jl" => body); rulings=SRC_ONLY)
+      refresh(Complexity(), root)
+      report = check(Complexity(), root)
+      @test ok(report)
+      @test report.held["cyc_over"] == 1
+      @test occursin("PASS, holding", sprint(show, report))
+      @test occursin("cyc_over=1", sprint(show, report))
+    end
+
+    @testset "totals skip a maximum, which no total can mean anything about" begin
+      root = gitrepo(Dict("src/a.jl" => "plain(x) = x + 1\n"); rulings=SRC_ONLY)
+      totals = CodeRatchet.held_totals(Complexity(), measure(Complexity(), root))
+      @test !haskey(totals, "cyc")
+      @test !haskey(totals, "cog")
+    end
+
+    @testset "the bootstrap case reports its debt too" begin
+      root = gitrepo(Dict("src/a.jl" => "plain(x) = x + 1\n"); rulings=SRC_ONLY)
+      report = check(Complexity(), root)
+      @test report.bootstrap
+      @test CodeRatchet.held_summary(report) == "clean"
+    end
+  end
+
   @testset "reporting" begin
     @testset "the remedy names a refresh last, not first" begin
       text = routes(; dismissal="")

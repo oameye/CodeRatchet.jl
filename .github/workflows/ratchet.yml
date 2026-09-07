@@ -30,6 +30,13 @@ on:
           list, never add to it. Empty runs everything configured.
         type: string
         default: ''
+      coverage:
+        description: >-
+          Run the package's tests with coverage and build an lcov.info before
+          checking. Needed by the coverage metric, which measures a tracefile
+          rather than the source: without this the gate has nothing to read.
+        type: boolean
+        default: false
       install-jetls:
         description: 'Install the jetls binary. Needed only by the lsp metric.'
         type: boolean
@@ -70,6 +77,21 @@ jobs:
         run: |
           julia -e 'using Pkg; Pkg.Apps.add(; url="https://github.com/aviatesk/JETLS.jl", rev="${{ inputs.jetls-rev }}")'
           echo "$HOME/.julia/bin" >> "$GITHUB_PATH"
+
+      # The coverage metric reads a tracefile, so something has to produce one.
+      # Done here rather than left to the caller because every consumer running
+      # that metric needs exactly these two steps.
+      - name: Build a coverage tracefile
+        if: ${{ inputs.coverage }}
+        run: |
+          julia --project=. -e 'using Pkg; Pkg.test(coverage=true)'
+          julia -e '
+            using Pkg; Pkg.activate(temp=true); Pkg.add("CoverageTools")
+            using CoverageTools
+            folders = filter(isdir, ["src", "ext"])
+            fcs = FileCoverage[]
+            for f in folders; append!(fcs, process_folder(f)); end
+            LCOV.writefile("lcov.info", fcs)'
 
       - name: Instantiate the ratchet environment
         run: julia --project=${{ inputs.ratchet-dir }} -e 'using Pkg; Pkg.instantiate()'

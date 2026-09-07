@@ -131,6 +131,7 @@ jobs:
     uses: oameye/CodeRatchet.jl/.github/workflows/ratchet.yml@main
     with:
       julia-version: '1.12'
+      coverage: true                   # only if you run the coverage metric
       install-jetls: true              # only if you run the lsp metric
       jetls-rev: '6893fcef26...'       # pin it; `release` moves under you
       metrics: 'complexity style docs' # optional: narrow, never widen
@@ -138,6 +139,10 @@ jobs:
 
 Calling the workflow rather than copying it means the gate's CI behaviour has
 one definition. Forty copies drift; one call does not.
+
+`coverage: true` runs the tests with coverage and builds the `lcov.info` the
+coverage metric reads, since that metric measures a tracefile rather than the
+source and has nothing to read without one.
 
 `metrics` narrows `[metrics].run` for that job and can never add to it.
 Narrowing is a legitimate thing to want: a repository whose JET is already
@@ -294,6 +299,27 @@ separate question from `binding`: a maximum both binds and is not debt.
 
 Environment: `CODERATCHET_ROOT` (repository root, default `pwd()`),
 `CODERATCHET_DIR` (default `<root>/code_ratchet`), `COVERAGE_LCOV`.
+
+## PASS is not clean
+
+A ratchet's `PASS` means *did not rise*, so the verdict always carries the debt
+behind it:
+
+```
+CodeRatchet complexity: PASS, holding cog_over=3, cyc_over=5
+CodeRatchet style: PASS, clean
+CodeRatchet coverage: PASS, holding misses=267
+```
+
+Writing this package I misread my own output three times in one sitting:
+`boxes: PASS` while the baseline held three boxes, `jet: PASS` while twelve
+reports stood. The numbers were in hand each time and the gate declined to
+mention them. A gate that can be mistaken for a clean bill of health is worse
+than a loud one.
+
+Totals skip a maximum, for the same reason the scorecard does: every non-empty
+file has a cyclomatic maximum, so a total over maxima means nothing. See
+[`debt`](#using-it).
 
 ## What turns the gate red
 

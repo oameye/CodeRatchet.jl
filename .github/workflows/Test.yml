@@ -37,6 +37,24 @@ jobs:
       - uses: julia-actions/julia-buildpkg@v1
       - uses: julia-actions/julia-runtest@v1
 
+  # The gate, run on this package. Every metric here was verified by hand on my
+  # machine and by fixture in the suite; pointing the tool at its own repository
+  # is what found an init that emitted TOML which does not parse, three Core.Box
+  # allocations, twelve JET reports and a `dir` argument that went nowhere.
+  # Calling the reusable workflow by local path also tests that workflow on
+  # every push, which is otherwise only exercised by a consumer repository.
+  selfcheck:
+    name: Self-check
+    needs: test
+    uses: ./.github/workflows/ratchet.yml
+    with:
+      julia-version: '1.12'
+      coverage: true
+      install-jetls: true
+      # The revision the lsp baseline was taken under. `release` moves, and an
+      # unpinned tool reddens the gate for a change nobody made.
+      jetls-rev: '6893fcef26708d64360c048e039102c76ad032c0'
+
   format:
     name: Format
     runs-on: ubuntu-latest

@@ -859,6 +859,44 @@ reason = "Test code."
     @test prov["binding"] == ["bind"]
   end
 
+  # `check` read its rulings from the dir it was given while `measure` read
+  # theirs from ratchet_dir(root), so a non-default directory took its scope
+  # from one file and its baselines from another. CODERATCHET_DIR made the two
+  # agree in practice, which is why nothing caught it until JETLS pointed at a
+  # `dir` argument that went unused two functions away.
+  @testset "scope and baselines come from the same directory" begin
+    root = gitrepo(
+      Dict("src/a.jl" => "f(x) = x\n", "src/b.jl" => "g(y) = y\n"); rulings=SRC_ONLY
+    )
+    # A second rulings file, in a directory that is not the default, naming a
+    # narrower scope. `measure` must honour it, not the default one.
+    elsewhere = joinpath(root, "other_ratchet")
+    mkpath(elsewhere)
+    write(
+      joinpath(elsewhere, "rulings.toml"),
+      """
+      [scope]
+      measure = ["src/a.jl"]
+
+      [[unmeasured_path]]
+      path = "src/b.jl"
+      reason = "Out of scope for this directory."
+
+      [[unmeasured_path]]
+      path = "test/"
+      reason = "Test code."
+      """,
+    )
+    rows = measure(Complexity(), root; dir=elsewhere)
+    @test collect(keys(rows)) == ["src/a.jl"]
+
+    report = check(Complexity(), root; dir=elsewhere)
+    @test report.bootstrap
+    refresh(Complexity(), root; dir=elsewhere)
+    @test ok(check(Complexity(), root; dir=elsewhere))
+    @test isfile(joinpath(elsewhere, "complexity_baseline.toml"))
+  end
+
   @testset "a missing rulings file is an error" begin
     @test_throws ErrorException read_rulings(mktempdir())
   end

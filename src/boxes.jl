@@ -117,8 +117,8 @@ function method_boxes(m::Method)
   return n
 end
 
-function measure(::Boxes, root::AbstractString)
-  rulings = read_rulings(ratchet_dir(root))
+function measure(::Boxes, root::AbstractString; dir::AbstractString=ratchet_dir(root))
+  rulings = read_rulings(dir)
   settings = boxes_settings(rulings)
   isdefined(Base, :visit) || error(
     "the boxes metric needs `Base.visit`, which this Julia does not have " *

@@ -101,12 +101,26 @@ function jetls_version(binary::AbstractString)
   for pattern in (r"^jetls version .+$"m, r"VERSION:\s*(\S+)")
     m = match(pattern, out)
     m === nothing && continue
-    return isempty(m.captures) ? String(strip(m.match)) : String(m.captures[1])
+    return isempty(m.captures) ? String(strip(m.match)) : String(captured(m, 1))
   end
   return String(strip(out))
 end
 
 # --- parsing ----------------------------------------------------------------
+
+"""
+    captured(m, i) -> SubString
+
+Group `i` of a match, refusing to carry its optionality any further.
+
+`RegexMatch.captures` is a `Vector{Union{Nothing,SubString{String}}}`, because
+a group need not participate in a match. Every group these patterns read is
+mandatory, so the `nothing` is unreachable, but the *type* says otherwise and
+`String(nothing)` is a MethodError: JET reported ten of them here. `something`
+narrows the union and throws a named error rather than a method error if a
+pattern is ever edited to make a group optional.
+"""
+captured(m::RegexMatch, i::Int) = something(m.captures[i])
 
 # A diagnostic's location is its own comment line; the finding itself ends with
 # a `[severity:code]` tag. Anchoring on the tag rather than on the box-drawing
@@ -132,13 +146,13 @@ function parse_diagnostics(text::AbstractString, root::AbstractString)
   for raw in eachline(IOBuffer(text))
     total = match(LSP_TOTAL, raw)
     if total !== nothing
-      claimed = parse(Int, total.captures[1])
+      claimed = parse(Int, captured(total, 1))
       continue
     end
     header = match(LSP_HEADER, raw)
     if header !== nothing
-      path = relative_to(String(header.captures[1]), root)
-      line = parse(Int, header.captures[2])
+      path = relative_to(String(captured(header, 1)), root)
+      line = parse(Int, captured(header, 2))
       continue
     end
     tag = match(LSP_TAG, raw)
@@ -148,7 +162,7 @@ function parse_diagnostics(text::AbstractString, root::AbstractString)
     push!(
       found,
       Diagnostic(
-        path, line, String(tag.captures[1]), String(tag.captures[2]), String(message)
+        path, line, String(captured(tag, 1)), String(captured(tag, 2)), String(message)
       ),
     )
   end
@@ -167,7 +181,7 @@ dismissal rather than widening it.
 function dismissed(diagnostic::Diagnostic, rulings::Rulings)
   for ruling in get(rulings.raw, "lsp_dismissal", Dict[])
     haskey(ruling, "reason") || error("every [[lsp_dismissal]] needs a `reason`")
-    any(k -> haskey(ruling, k), ("code", "severity", "pattern")) || error(
+    any(k -> haskey(ruling, k), ("code", "severity", "pattern"))::Bool || error(
       "an [[lsp_dismissal]] with no `code`, `severity` or `pattern` would dismiss " *
       "every diagnostic; name at least one",
     )
@@ -200,8 +214,8 @@ function run_jetls(root::AbstractString, settings)
   return read(pipeline(ignorestatus(cmd); stderr=devnull), String)
 end
 
-function measure(::Lsp, root::AbstractString)
-  rulings = read_rulings(ratchet_dir(root))
+function measure(::Lsp, root::AbstractString; dir::AbstractString=ratchet_dir(root))
+  rulings = read_rulings(dir)
   settings = lsp_settings(rulings)
   found, claimed = parse_diagnostics(run_jetls(root, settings), root)
   claimed >= 0 &&

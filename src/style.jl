@@ -147,11 +147,18 @@ end
 """
     parse_file(root, rel)
 
-The file's syntax tree, or `Expr(:toplevel)` when it does not parse.
+The file's syntax tree, or an empty `Expr(:toplevel)` when the file cannot be
+read at all.
 
-A parse failure is not swallowed: `parse_failures` fails the whole gate on it
-separately, and returning an empty tree here keeps that one failure from also
-appearing as every rule dropping to zero.
+A syntax error does not reach the `catch`: `Meta.parseall` returns a tree
+carrying an `Expr(:error, ...)` node rather than throwing, and that node holds
+no definition and no `Union`, so every rule reads zero from it. The zero is not
+a pass, because `parse_failures` fails the whole gate on an unparsable file
+separately. That split is the point: a gate that stops measuring without
+failing is worse than no gate.
+
+The `catch` is for the file being unreadable, which is a different failure and
+is why it returns an empty tree rather than propagating.
 """
 function parse_file(root::AbstractString, rel::AbstractString)
   try
@@ -216,7 +223,7 @@ function count_union_nothing(file::FileUnderTest)
     # `any` is three-valued, so inference gives it Union{Bool,Missing} even
     # where no predicate here can return missing. `=== true` keeps a Bool out
     # of `&&` rather than leaving a Missing to reach it.
-    (any(is_nothing_type, e.args[2:end]) === true) && (found[] += 1)
+    any(is_nothing_type, e.args[2:end])::Bool && (found[] += 1)
     return nothing
   end
   return found[]
@@ -240,9 +247,9 @@ exported.
 function count_underscore_names(file::FileUnderTest)
   found = Ref(startswith(basename(file.rel), "_") ? 1 : 0)
   walk(file.tree) do e
-    named = if e.head in DEFINITION_HEADS
+    named = if oneof(e.head, DEFINITION_HEADS)
       definition_name(e)
-    elseif e.head === :(=) && e.args[1] isa Expr && e.args[1].head in (:call, :where)
+    elseif e.head === :(=) && e.args[1] isa Expr && oneof(e.args[1].head, (:call, :where))
       definition_name(e)
     else
       ""
@@ -271,12 +278,12 @@ count_implicit_kwargs(file::FileUnderTest) = kwargs_in(file.tree)
 
 function kwargs_in(e)
   e isa Expr || return 0
-  if e.head in (:function, :macro) && length(e.args) >= 2
+  if oneof(e.head, (:function, :macro)) && length(e.args) >= 2
     return kwargs_in_signature(e.args[1]) + sum(kwargs_in, e.args[2:end]; init=0)
   elseif e.head === :(=) &&
     length(e.args) == 2 &&
     e.args[1] isa Expr &&
-    e.args[1].head in (:call, :where)
+    oneof(e.args[1].head, (:call, :where))
     return kwargs_in_signature(e.args[1]) + kwargs_in(e.args[2])
   end
   n = 0
@@ -337,9 +344,9 @@ function count_rule(rule::PatternRule, file::FileUnderTest)
   return count(line -> occursin(rule.pattern, line), file.lines)
 end
 
-function measure(metric::Style, root::AbstractString)
+function measure(metric::Style, root::AbstractString; dir::AbstractString=ratchet_dir(root))
   rows = Dict{String,Row}()
-  for rel in scoped_files(root, read_rulings(ratchet_dir(root)).scope)
+  for rel in scoped_files(root, read_rulings(dir).scope)
     lines = try
       readlines(joinpath(root, rel))
     catch
@@ -363,7 +370,7 @@ is the order a person would work them in.
 function style_candidates(root::AbstractString; dir::AbstractString=ratchet_dir(root))
   metric = Style(root; dir)
   found = Candidate[]
-  for (rel, row) in measure(metric, root)
+  for (rel, row) in measure(metric, root; dir)
     for rule in metric.rules
       n = get(row, rule_name(rule), 0)
       n > 0 && push!(found, Candidate(rel, "style", "$(rule_name(rule)) x$n", Float64(n)))

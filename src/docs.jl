@@ -53,12 +53,12 @@ Add every name `e` declares public.
 arguments depending on how it was written, so both shapes are walked.
 """
 function declared_public!(into::Set{String}, e::Expr)
-  if e.head in (:export, :public)
+  if oneof(e.head, (:export, :public))
     for a in e.args
       name = defname(a)
       isempty(name) || push!(into, name)
     end
-  elseif e.head === :macrocall && defname(e.args[1]) in PUBLIC_MACROS
+  elseif e.head === :macrocall && oneof(defname(e.args[1]), PUBLIC_MACROS)
     for a in e.args[2:end]
       a isa LineNumberNode && continue
       if a isa Expr && a.head === :tuple
@@ -100,8 +100,8 @@ Add the name `e` defines. Docstring wrappers are walked through rather than
 counted, so a documented definition is reached at the definition itself.
 """
 function defined!(into::Set{String}, e::Expr)
-  e.head in DEFINITION_HEADS ||
-    (e.head === :(=) && e.args[1] isa Expr && e.args[1].head in (:call, :where)) ||
+  oneof(e.head, DEFINITION_HEADS) ||
+    (e.head === :(=) && e.args[1] isa Expr && oneof(e.args[1].head, (:call, :where))) ||
     return nothing
   name = definition_name(e)
   isempty(name) || push!(into, name)
@@ -132,8 +132,8 @@ function docs_index(root::AbstractString, files)
   return public, documented
 end
 
-function measure(::Docstrings, root::AbstractString)
-  files = scoped_files(root, read_rulings(ratchet_dir(root)).scope)
+function measure(::Docstrings, root::AbstractString; dir::AbstractString=ratchet_dir(root))
+  files = scoped_files(root, read_rulings(dir).scope)
   public, documented = docs_index(root, files)
   rows = Dict{String,Row}()
   for rel in files
@@ -174,7 +174,7 @@ Files owing docstrings, ranked by how many.
 """
 function docs_candidates(root::AbstractString; dir::AbstractString=ratchet_dir(root))
   found = Candidate[]
-  for (rel, row) in measure(Docstrings(), root)
+  for (rel, row) in measure(Docstrings(), root; dir)
     n = get(row, "undocumented", 0)
     n > 0 &&
       push!(found, Candidate(rel, "docs", "$n public name(s) undocumented", Float64(n)))

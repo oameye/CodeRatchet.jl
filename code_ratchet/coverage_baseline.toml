@@ -4,7 +4,7 @@
 
 [provenance]
 attribution = "top_level_definition_ranges"
-commit = "1ab176c"
+commit = "9da4a1e"
 metric = "coverage"
 source = "lcov"
 binding = ["misses"]
@@ -14,11 +14,11 @@ lines = 56
 misses = 20
 
 [files."src/CodeRatchet.jl"]
-lines = 229
+lines = 231
 misses = 11
 
 [files."src/all.jl"]
-lines = 63
+lines = 45
 misses = 0
 
 [files."src/boxes.jl"]
@@ -46,11 +46,11 @@ lines = 102
 misses = 1
 
 [files."src/lsp.jl"]
-lines = 81
+lines = 82
 misses = 39
 
 [files."src/style.jl"]
-lines = 186
+lines = 126
 misses = 2
 
 [files."src/triage.jl"]

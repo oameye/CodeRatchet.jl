@@ -13,6 +13,7 @@ using CodeRatchet:
   measure,
   ok,
   parse_file,
+  parse_failures,
   read_rulings,
   refresh,
   style_candidates,
@@ -123,6 +124,35 @@ end
     @testset "a call inside a default value still counts" begin
       @test count_in(count_implicit_kwargs, "f(x = g(name = 1)) = x") == 1
     end
+  end
+
+  # A defensive method is still a method, and a direct unit test is the right
+  # test for one: no Julia syntax puts an Integer in a type position of a
+  # Union, so nothing reachable through parse_file exercises these.
+  @testset "a type position holding something unexpected is not a match" begin
+    @test !CodeRatchet.is_nothing_type(42)
+    @test !CodeRatchet.is_nothing_type("Nothing")
+    @test !CodeRatchet.names_union(42)
+    @test !CodeRatchet.names_union("Union")
+  end
+
+  # A file that does not parse measures as zero on every rule, and the gate
+  # fails on it separately through parse_failures. Without that split, one
+  # syntax error would read as every rule suddenly being satisfied.
+  @testset "an unparsable file measures zero, and fails the gate separately" begin
+    root = gitrepo(Dict("src/broken.jl" => "function oops(\n"); rulings=STYLE_RULINGS)
+    # Meta.parseall does not throw here: it returns a tree carrying an
+    # Expr(:error, ...), which holds nothing any rule counts.
+    tree = parse_file(root, "src/broken.jl")
+    @test tree.head === :toplevel
+    @test any(a -> a isa Expr && a.head === :error, tree.args)
+    @test measure(Style(root), root)["src/broken.jl"]["union_nothing"] == 0
+    @test parse_failures(root, ["src/broken.jl"]) == ["src/broken.jl"]
+  end
+
+  @testset "a file that cannot be read at all gives an empty tree" begin
+    root = gitrepo(Dict("src/a.jl" => "f(x) = x"); rulings=STYLE_RULINGS)
+    @test parse_file(root, "src/nowhere.jl") == Expr(:toplevel)
   end
 
   @testset "the rule set" begin

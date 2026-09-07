@@ -117,8 +117,8 @@ defname(x::GlobalRef) = defname(x.name)
 defname(::Any) = ""
 function defname(e::Expr)
   isempty(e.args) && return ""
-  e.head in (:call, :where, :(<:), :curly, :macrocall) && return defname(e.args[1])
-  e.head in (:(::), :.) && return defname(e.args[end])
+  oneof(e.head, (:call, :where, :(<:), :curly, :macrocall)) && return defname(e.args[1])
+  oneof(e.head, (:(::), :.)) && return defname(e.args[end])
   return ""
 end
 
@@ -145,13 +145,13 @@ expression declares nothing a reader would name.
 function definition_name(e0)
   e = unwrap(e0)
   e isa Expr || return ""
-  if e.head in (:function, :macro)
+  if oneof(e.head, (:function, :macro))
     return defname(e.args[1])
-  elseif e.head === :(=) && e.args[1] isa Expr && e.args[1].head in (:call, :where)
+  elseif e.head === :(=) && e.args[1] isa Expr && oneof(e.args[1].head, (:call, :where))
     return defname(e.args[1])
   elseif e.head === :struct
     return length(e.args) >= 2 ? defname(e.args[2]) : ""
-  elseif e.head in (:abstract, :primitive)
+  elseif oneof(e.head, (:abstract, :primitive))
     return isempty(e.args) ? "" : defname(e.args[1])
   elseif e.head === :const
     return e.args[1] isa Expr ? defname(e.args[1].args[1]) : defname(e.args[1])
@@ -257,8 +257,8 @@ function exemptions(rulings::Rulings)
   return out
 end
 
-function measure(metric::Coverage, root::AbstractString)
-  rulings = read_rulings(ratchet_dir(root))
+function measure(::Coverage, root::AbstractString; dir::AbstractString=ratchet_dir(root))
+  rulings = read_rulings(dir)
   measured = parse_lcov(lcov_path(root), root)
   rows = Dict{String,Row}()
   for rel in scoped_files(root, rulings.scope)
@@ -317,7 +317,7 @@ A file entering with no baseline row enters fully covered or fully exempted.
 Coverage is the one metric with a meaningful, reachable zero, so a new file has
 no excuse to arrive with unexplained misses.
 """
-function entry_failures(::Coverage, root::AbstractString, paths, rows)
+function entry_failures(::Coverage, root::AbstractString, paths, ::Any)
   isempty(paths) && return String[]
   rulings = read_rulings(ratchet_dir(root))
   ruled = exemptions(rulings)
@@ -344,7 +344,7 @@ The files still short of zero misses, worst first. The terminal condition the
 map drives toward, which the ratchet alone never reports.
 """
 function terminal(root::AbstractString=pwd(); dir::AbstractString=ratchet_dir(root))
-  rows = measure(Coverage(), root)
+  rows = measure(Coverage(), root; dir)
   short = [(p, r["misses"]) for (p, r) in rows if r["misses"] > 0]
   sort!(short; by=x -> -x[2])
   return ["$p: $n miss(es)" for (p, n) in short]

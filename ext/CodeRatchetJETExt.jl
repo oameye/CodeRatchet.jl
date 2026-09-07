@@ -125,8 +125,10 @@ function dismissed(report, rulings::Rulings)
   return false
 end
 
-function CodeRatchet.measure(::Inference, root::AbstractString)
-  rulings = read_rulings(ratchet_dir(root))
+function CodeRatchet.measure(
+  ::Inference, root::AbstractString; dir::AbstractString=ratchet_dir(root)
+)
+  rulings = read_rulings(dir)
   settings = jet_settings(rulings)
 
   for name in settings.load

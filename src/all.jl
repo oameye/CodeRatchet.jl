@@ -43,7 +43,7 @@ function configured_metrics(
   unknown = setdiff(names, METRIC_ORDER)
   isempty(unknown) || error(
     "unknown metric(s) in [metrics].run: " *
-    join(sort(unknown), ", ") *
+    join(sort(collect(unknown)), ", ") *
     ". Known metrics: " *
     join(METRIC_ORDER, ", "),
   )

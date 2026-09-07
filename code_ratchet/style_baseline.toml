@@ -3,7 +3,7 @@
 # judgements live in rulings.toml beside it.
 
 [provenance]
-commit = "1ab176c"
+commit = "9da4a1e"
 metric = "style"
 rules = ["implicit_kwarg", "underscore_name", "union_nothing"]
 binding = ["union_nothing", "underscore_name", "implicit_kwarg"]

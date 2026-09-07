@@ -21,6 +21,20 @@ using TOML: TOML
 
 export Boxes, Complexity, Coverage, Docstrings, Lsp, Style, check, refresh
 
+"""
+    oneof(x, options) -> Bool
+
+Whether `x` is one of `options`, as a `Bool` and not a `Union{Bool,Missing}`.
+
+`in` and `any` are three-valued: they return `missing` when an element's
+comparison does, so inference types them `Union{Bool,Missing}` even where the
+elements are symbols and no comparison can. JETLS reported six
+`non-boolean Missing found in boolean context` warnings on exactly that, each
+one a `missing` that would reach an `&&`. The assertion says it cannot happen
+and fails loudly rather than silently if it ever does.
+"""
+oneof(x, options) = (x in options)::Bool
+
 # --- what a measurement is -------------------------------------------------
 
 """
@@ -65,6 +79,21 @@ Baseline filename stem, so `Complexity()` writes `complexity_baseline.toml`.
 function metric_name end
 
 """
+    baseline_stem(metric) -> String
+
+The baseline's filename, with the interface contract asserted rather than
+assumed.
+
+`metric_name` is a bare interface function, so inference gives it `Any` for an
+abstract `Metric`, and `Any * "_baseline.toml"` admits `Missing` and `Regex`:
+JET reported two `joinpath(::AbstractString, ::Missing)` errors on exactly
+that. The assertion makes the type concrete and turns a metric returning the
+wrong thing into a named failure at the boundary rather than a method error
+deeper in.
+"""
+baseline_stem(metric::Metric) = (metric_name(metric)::String) * "_baseline.toml"
+
+"""
     binding(metric) -> Tuple{Vararg{String}}
 
 The numbers the ratchet compares. A rise in one of these is a violation.
@@ -81,9 +110,17 @@ two files that merely share a worst definition.
 function row_numbers end
 
 """
-    measure(metric, root) -> Dict{String,Row}
+    measure(metric, root; dir) -> Dict{String,Row}
 
 Measure `root`, keyed by repository-relative path with `/` separators.
+
+`dir` is where `rulings.toml` lives, and it is a parameter rather than
+recomputed from `root` because it was recomputed before and that was a bug:
+`check` read its rulings from the `dir` it was given while `measure` read
+theirs from `ratchet_dir(root)`, so a non-default directory took its scope from
+one file and its baselines from another. `CODERATCHET_DIR` made the two agree
+in practice, which is why nothing caught it until JETLS pointed at a `dir`
+argument that went unused two functions away.
 """
 function measure end
 
@@ -107,7 +144,7 @@ Empty by default, which lets a new file enter at whatever it measures. That is
 right when the metric has no natural zero. Coverage overrides it: an added file
 enters fully covered or exempted, because there the zero is meaningful.
 """
-entry_failures(::Metric, ::AbstractString, paths, rows) = String[]
+entry_failures(::Metric, ::AbstractString, ::Any, ::Any) = String[]
 
 """
     direction(metric, key) -> Symbol
@@ -203,7 +240,7 @@ end
 # --- the baseline file -----------------------------------------------------
 
 function baseline_path(metric::Metric, dir::AbstractString)
-  return joinpath(dir, metric_name(metric) * "_baseline.toml")
+  return joinpath(dir, baseline_stem(metric))
 end
 
 function read_baseline(metric::Metric, dir::AbstractString)
@@ -492,7 +529,7 @@ function check(
   metric::Metric, root::AbstractString=pwd(); dir::AbstractString=ratchet_dir(root)
 )
   rulings = read_rulings(dir)
-  current = measure(metric, root)
+  current = measure(metric, root; dir)
   baseline, recorded = read_baseline(metric, dir)
 
   unparsable = parse_failures(root, keys(current))
@@ -567,7 +604,9 @@ function refresh(
     "refresh refused: these files do not parse, so their numbers are meaningless: " *
     join(report.unparsable, ", "),
   )
-  write(baseline_path(metric, dir), render_baseline(metric, measure(metric, root), root))
+  write(
+    baseline_path(metric, dir), render_baseline(metric, measure(metric, root; dir), root)
+  )
   return report
 end
 
@@ -737,7 +776,7 @@ of this package.
 function write_artifact(metric::Metric, root::AbstractString, dir::AbstractString)
   out = joinpath(dir, ARTIFACT_DIR)
   mkpath(out)
-  path = joinpath(out, metric_name(metric) * "_baseline.toml")
+  path = joinpath(out, baseline_stem(metric))
   write(path, render_baseline(metric, measure(metric, root), root))
   return path
 end

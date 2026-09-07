@@ -1,9 +1,5 @@
 using CodeComplexity:
-  CodeComplexity,
-  CyclomaticComplexity,
-  CognitiveComplexity,
-  ArgumentCountComplexity,
-  measure_file
+  ArgumentCountComplexity, CognitiveComplexity, CyclomaticComplexity, measure_file
 
 """
     Complexity()
@@ -74,8 +70,8 @@ function provenance(::Complexity, root::AbstractString)
   )
 end
 
-function measure(metric::Complexity, root::AbstractString)
-  rulings = read_rulings(ratchet_dir(root))
+function measure(::Complexity, root::AbstractString; dir::AbstractString=ratchet_dir(root))
+  rulings = read_rulings(dir)
   rows = Dict{String,Row}()
   for rel in scoped_files(root, rulings.scope)
     numbers = Dict{String,Int}()

@@ -6,3 +6,8 @@ Manifest.toml
 *.jl.*.cov
 *.jl.mem
 lcov.info
+
+# The gate's per-run scratch output. The baselines and rulings.toml beside them
+# are committed; these are not.
+code_ratchet/_refresh/
+code_ratchet/_triage/

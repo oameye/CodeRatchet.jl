@@ -128,6 +128,23 @@ end
 # --- walking ----------------------------------------------------------------
 
 """
+    FileUnderTest
+
+One file, in the forms the rules need it: its repository-relative path, its
+syntax tree, and its lines.
+
+A struct rather than three positional arguments, because no rule needs all
+three and a uniform signature made every implementation ignore most of it.
+Eight `unused-argument` diagnostics said so, from this package pointed at
+itself.
+"""
+struct FileUnderTest
+  rel::String
+  tree::Any
+  lines::Vector{String}
+end
+
+"""
     parse_file(root, rel)
 
 The file's syntax tree, or `Expr(:toplevel)` when it does not parse.
@@ -187,16 +204,22 @@ them makes `nothing` a value the next function has to handle, and the handling
 spreads. Sink the absence into a type that has a meaningful zero, a separate
 method, or an error at the boundary.
 """
-function count_union_nothing(root::AbstractString, rel::AbstractString, tree)
-  n = 0
-  walk(tree) do e
+function count_union_nothing(file::FileUnderTest)
+  # A Ref, not `n = 0`. `n += 1` inside the closure reassigns a captured
+  # binding, and lowering answers that with a Core.Box: every read becomes a
+  # dynamic lookup. This package's own Boxes metric found it here.
+  found = Ref(0)
+  walk(file.tree) do e
     e.head === :curly || return nothing
     length(e.args) >= 2 || return nothing
     names_union(e.args[1]) || return nothing
-    any(is_nothing_type, e.args[2:end]) && (n += 1)
+    # `any` is three-valued, so inference gives it Union{Bool,Missing} even
+    # where no predicate here can return missing. `=== true` keeps a Bool out
+    # of `&&` rather than leaving a Missing to reach it.
+    (any(is_nothing_type, e.args[2:end]) === true) && (found[] += 1)
     return nothing
   end
-  return n
+  return found[]
 end
 
 const DEFINITION_HEADS = (:function, :macro, :struct, :abstract, :primitive, :const)
@@ -214,9 +237,9 @@ exported.
 `:macrocall` is walked through rather than counted, so a documented or
 `@kwdef`-wrapped definition is counted once at the definition it wraps.
 """
-function count_underscore_names(root::AbstractString, rel::AbstractString, tree)
-  n = startswith(basename(rel), "_") ? 1 : 0
-  walk(tree) do e
+function count_underscore_names(file::FileUnderTest)
+  found = Ref(startswith(basename(file.rel), "_") ? 1 : 0)
+  walk(file.tree) do e
     named = if e.head in DEFINITION_HEADS
       definition_name(e)
     elseif e.head === :(=) && e.args[1] isa Expr && e.args[1].head in (:call, :where)
@@ -224,10 +247,10 @@ function count_underscore_names(root::AbstractString, rel::AbstractString, tree)
     else
       ""
     end
-    startswith(named, "_") && (n += 1)
+    startswith(named, "_") && (found[] += 1)
     return nothing
   end
-  return n
+  return found[]
 end
 
 """
@@ -244,9 +267,7 @@ lenient: `f(x, a = 1)` in a signature declares an *optional positional*
 argument, which the parser also represents as `:kw`. Counting those would flag
 a construct that has nothing to do with keywords.
 """
-function count_implicit_kwargs(root::AbstractString, rel::AbstractString, tree)
-  return kwargs_in(tree)
-end
+count_implicit_kwargs(file::FileUnderTest) = kwargs_in(file.tree)
 
 function kwargs_in(e)
   e isa Expr || return 0
@@ -300,8 +321,8 @@ function kwargs_in_signature(sig)
 end
 
 """
-The named rules, by the name a `rulings.toml` writes. Each takes the root, the
-repository-relative path and the parsed tree, and returns a count.
+The named rules, by the name a `rulings.toml` writes. Each takes a
+[`FileUnderTest`](@ref) and returns a count.
 """
 const STYLE_RULES = Dict{String,Function}(
   "union_nothing" => count_union_nothing,
@@ -311,25 +332,21 @@ const STYLE_RULES = Dict{String,Function}(
 
 # --- measuring --------------------------------------------------------------
 
-function count_rule(rule::NamedRule, root, rel, tree, lines)
-  return STYLE_RULES[rule.name](root, rel, tree)
-end
-function count_rule(rule::PatternRule, root, rel, tree, lines)
-  return count(line -> occursin(rule.pattern, line), lines)
+count_rule(rule::NamedRule, file::FileUnderTest) = STYLE_RULES[rule.name](file)
+function count_rule(rule::PatternRule, file::FileUnderTest)
+  return count(line -> occursin(rule.pattern, line), file.lines)
 end
 
 function measure(metric::Style, root::AbstractString)
   rows = Dict{String,Row}()
   for rel in scoped_files(root, read_rulings(ratchet_dir(root)).scope)
-    tree = parse_file(root, rel)
     lines = try
       readlines(joinpath(root, rel))
     catch
       String[]
     end
-    rows[rel] = Row(
-      Dict(rule_name(r) => count_rule(r, root, rel, tree, lines) for r in metric.rules)
-    )
+    file = FileUnderTest(rel, parse_file(root, rel), lines)
+    rows[rel] = Row(Dict(rule_name(r) => count_rule(r, file) for r in metric.rules))
   end
   return rows
 end

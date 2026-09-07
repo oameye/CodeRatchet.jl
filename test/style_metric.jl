@@ -32,7 +32,7 @@ function count_in(fn, body::AbstractString; rel::AbstractString="src/f.jl")
   path = joinpath(dir, rel)
   mkpath(dirname(path))
   write(path, body)
-  return fn(dir, rel, parse_file(dir, rel))
+  return fn(CodeRatchet.FileUnderTest(rel, parse_file(dir, rel), readlines(path)))
 end
 
 @testset "the Style metric" begin

@@ -91,17 +91,27 @@ function ratchet_project(identity)
   println(io, "# a commit rather than a branch: a gate's numbers depend on the tool that")
   println(io, "# measured them, so a tool free to move would move the gate underneath you.")
   println(io)
+  # A repository whose package IS CodeRatchet needs one entry, not two. Emitting
+  # both produced a duplicate key and a file that does not parse, which is what
+  # pointing this at its own repository found.
+  itself = identity.name == "CodeRatchet"
   println(io, "[deps]")
   println(io, "CodeRatchet = \"0e86a969-c127-44ad-8bee-7851ffae31d4\"")
-  isempty(identity.uuid) ||
+  itself ||
+    isempty(identity.uuid) ||
     println(io, identity.name, " = ", repr(identity.uuid), "  # the boxes and jet metrics")
   println(io, "JET = \"c3a54625-cd67-489e-a8e7-0a5a0ff4e31b\"")
   println(io)
   println(io, "[sources]")
-  println(
-    io, "CodeRatchet = {url = \"https://github.com/oameye/CodeRatchet.jl\", rev = \"main\"}"
-  )
-  isempty(identity.name) || println(io, identity.name, " = {path = \"..\"}")
+  if itself
+    println(io, "CodeRatchet = {path = \"..\"}")
+  else
+    println(
+      io,
+      "CodeRatchet = {url = \"https://github.com/oameye/CodeRatchet.jl\", rev = \"main\"}",
+    )
+    isempty(identity.name) || println(io, identity.name, " = {path = \"..\"}")
+  end
   return String(take!(io))
 end
 

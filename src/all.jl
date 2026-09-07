@@ -57,7 +57,11 @@ function configured_metrics(
     )
     names = collect(intersect(names, only))
   end
-  return Metric[metric_from(n, root) for n in METRIC_ORDER if n in names]
+  # A fresh binding, because the comprehension below is a closure and `names`
+  # was reassigned above: capturing a reassigned binding boxes it. Found by
+  # this package's own Boxes metric, run on this package.
+  selected = names
+  return Metric[metric_from(n, root) for n in METRIC_ORDER if n in selected]
 end
 
 """

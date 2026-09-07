@@ -1,0 +1,37 @@
+# The hand-written half of the gate. Nothing here is measured, and no verb
+# in CodeRatchet rewrites this file: the baselines beside it are rewritten
+# wholesale, and no human paragraph should share a file with that.
+
+[metrics]
+# Every gate `all` runs. Add "coverage", "boxes", "lsp" and "jet"
+# once their blocks below are filled in.
+run = ["complexity", "style", "docs", "coverage", "boxes", "lsp", "jet"]
+
+[scope]
+measure = ["src/", "ext/"]
+
+# A starting point, not a recommendation. The ratchet holds whatever a file
+# already measures, so these decide what counts as bad rather than what
+# fails: raise them and the counts of definitions above them fall.
+[thresholds]
+cyclomatic = 10
+cognitive = 15
+argcount = 6
+
+[style]
+rules = ["union_nothing", "underscore_name", "implicit_kwarg"]
+
+[[unmeasured_path]]
+path = "test/"
+reason = "Test code. It has its own standards."
+
+[boxes]
+package = "CodeRatchet"
+
+[jet]
+package = "CodeRatchet"
+target_modules = ["CodeRatchet"]
+load = ["JET"]
+
+[lsp]
+entry = ["src/CodeRatchet.jl"]

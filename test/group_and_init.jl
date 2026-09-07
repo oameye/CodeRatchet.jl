@@ -3,6 +3,7 @@
 
 using Test
 using CodeRatchet
+using TOML: TOML
 using CodeRatchet:
   Complexity,
   Docstrings,
@@ -196,6 +197,37 @@ end
     @test isempty(initialise(root))
     @test read(joinpath(ratchet_dir(root), CodeRatchet.RULINGS), String) == "# mine\n"
     @test !isempty(initialise(root; force=true))
+  end
+
+  # Found by running init on CodeRatchet's own repository: the package under
+  # measurement being the tool itself emitted the dependency twice, and the
+  # result was TOML that does not parse.
+  @testset "the generated Project.toml parses" begin
+    for name in ("Demo", "CodeRatchet")
+      root = gitrepo(
+        Dict(
+          "Project.toml" => "name = $(repr(name))\nuuid = \"aaaa-bbbb\"\n",
+          "src/$name.jl" => "module $name end\n",
+        ),
+      )
+      initialise(root)
+      raw = TOML.parsefile(joinpath(ratchet_dir(root), "Project.toml"))
+      @test haskey(raw["deps"], "CodeRatchet")
+      @test haskey(raw, "sources")
+    end
+  end
+
+  @testset "a repository whose package is the tool names it once" begin
+    root = gitrepo(
+      Dict(
+        "Project.toml" => "name = \"CodeRatchet\"\nuuid = \"0e86a969\"\n",
+        "src/CodeRatchet.jl" => "module CodeRatchet end\n",
+      ),
+    )
+    initialise(root)
+    raw = TOML.parsefile(joinpath(ratchet_dir(root), "Project.toml"))
+    @test length(raw["deps"]) == 2                     # itself and JET
+    @test raw["sources"]["CodeRatchet"] == Dict("path" => "..")
   end
 
   @testset "a guessed reason is offered for a known directory, flagged for others" begin

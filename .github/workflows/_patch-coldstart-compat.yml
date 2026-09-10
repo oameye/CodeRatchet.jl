@@ -14,25 +14,27 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: feat/coldstart-julia-1.13
-      - name: Apply exact compatibility and formatting fixes
+      - name: Apply compatibility and formatter fixes
         run: |
           python - <<'PY'
           from pathlib import Path
+          import re
 
           source = Path('src/coldstart.jl')
           text = source.read_text()
-          old = '''  scenario_file =
-            isabspath(report.config.scenarios) ? report.config.scenarios : joinpath(head, report.config.scenarios)
-          '''
-          new = '''  scenario_file = if isabspath(report.config.scenarios)
+          pattern = re.compile(
+              r'  scenario_file =\s*\n\s*isabspath\(report\.config\.scenarios\) \? '
+              r'report\.config\.scenarios : joinpath\(head, report\.config\.scenarios\)\s*\n'
+          )
+          replacement = '''  scenario_file = if isabspath(report.config.scenarios)
             report.config.scenarios
           else
             joinpath(head, report.config.scenarios)
           end
           '''
-          if text.count(old) != 1:
-              raise SystemExit(f'expected one scenario formatting target, found {text.count(old)}')
-          text = text.replace(old, new)
+          text, count = pattern.subn(replacement, text)
+          if count != 1:
+              raise SystemExit(f'expected one scenario formatting target, found {count}')
           old = '    println(io, "sysimage_target=", Sys.sysimage_target())\n'
           new = '    println(io, "cpu_target=", unsafe_string(Base.JLOptions().cpu_target))\n'
           if text.count(old) != 1:

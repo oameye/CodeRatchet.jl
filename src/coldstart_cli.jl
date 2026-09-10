@@ -1,6 +1,15 @@
 export coldstart_compare, coldstart_main
 
-function _coldstart_usage(problem::AbstractString="")
+mutable struct ColdStartCLIOptions
+  base::String
+  head::String
+  ratchet_dir::String
+  output::String
+end
+
+ColdStartCLIOptions() = ColdStartCLIOptions("", pwd(), "code_ratchet", "")
+
+function coldstart_usage(problem::AbstractString="")
   isempty(problem) || println(stderr, "coderatchet coldstart: ", problem)
   println(
     stderr,
@@ -10,9 +19,46 @@ function _coldstart_usage(problem::AbstractString="")
   return 2
 end
 
-function _coldstart_flag_value(args, index, flag)
-  index < length(args) || error("$flag needs a value")
+function coldstart_flag_value(args, index, flag)
+  index < length(args) || throw(ArgumentError("$flag needs a value"))
   return String(args[index + 1])
+end
+
+function set_coldstart_option!(options::ColdStartCLIOptions, flag::AbstractString, value::String)
+  if flag == "--base"
+    options.base = value
+  elseif flag == "--head"
+    options.head = value
+  elseif flag == "--ratchet-dir"
+    options.ratchet_dir = value
+  elseif flag == "--output"
+    options.output = value
+  else
+    throw(ArgumentError("unknown flag $(repr(flag))"))
+  end
+  return options
+end
+
+function parse_coldstart_options(args::AbstractVector{<:AbstractString})
+  options = ColdStartCLIOptions()
+  index = 2
+  while index <= length(args)
+    flag = String(args[index])
+    value = coldstart_flag_value(args, index, flag)
+    set_coldstart_option!(options, flag, value)
+    index += 2
+  end
+  isempty(options.base) && throw(ArgumentError("--base is required"))
+  return options
+end
+
+function coldstart_report(options::ColdStartCLIOptions)
+  return coldstart_compare(
+    options.base,
+    options.head;
+    ratchet_dir=options.ratchet_dir,
+    output_dir=options.output,
+  )
 end
 
 """
@@ -26,36 +72,18 @@ latency compares two checkouts in one run. A reusable workflow calls this
 function directly.
 """
 function coldstart_main(args::AbstractVector{<:AbstractString}=ARGS)
-  isempty(args) && return _coldstart_usage()
-  args[1] == "compare" || return _coldstart_usage("expected `compare`")
+  isempty(args) && return coldstart_usage()
+  args[1] == "compare" || return coldstart_usage("expected `compare`")
 
-  base = ""
-  head = pwd()
-  ratchet_dir = "code_ratchet"
-  output = ""
-  i = 2
-  while i <= length(args)
-    flag = args[i]
-    if flag == "--base"
-      base = _coldstart_flag_value(args, i, flag)
-      i += 2
-    elseif flag == "--head"
-      head = _coldstart_flag_value(args, i, flag)
-      i += 2
-    elseif flag == "--ratchet-dir"
-      ratchet_dir = _coldstart_flag_value(args, i, flag)
-      i += 2
-    elseif flag == "--output"
-      output = _coldstart_flag_value(args, i, flag)
-      i += 2
-    else
-      return _coldstart_usage("unknown flag $(repr(flag))")
-    end
+  options = try
+    parse_coldstart_options(args)
+  catch err
+    err isa ArgumentError || rethrow()
+    return coldstart_usage(err.msg)
   end
-  isempty(base) && return _coldstart_usage("--base is required")
 
   report = try
-    coldstart_compare(base, head; ratchet_dir, output_dir=output)
+    coldstart_report(options)
   catch err
     println(stderr, sprint(showerror, err))
     return 1

@@ -6,6 +6,7 @@ version = "0.1.0"
 [deps]
 CodeComplexity = "6a833b0f-2137-4092-987b-66bce4e6b438"
 JuliaSyntax = "70703baa-626e-46a2-a12c-08ffd08c73b4"
+SHA = "ea8e919c-243c-51af-8825-aaa63cd721ce"
 TOML = "fa267f1f-6049-4f14-aa54-33bafae1ed76"
 
 [weakdeps]
@@ -18,6 +19,7 @@ CodeRatchetJETExt = "JET"
 CodeComplexity = "0.2"
 JET = "0.9, 0.10, 0.11, 0.12"
 JuliaSyntax = "1"
+SHA = "0.7, 1"
 TOML = "1"
 julia = "1.12"
 

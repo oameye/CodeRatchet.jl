@@ -1,0 +1,65 @@
+name: Refresh cold-start baselines
+
+on:
+  push:
+    branches: [feat/coldstart-julia-1.13]
+    paths:
+      - .github/workflows/_refresh-coldstart-baselines.yml
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/coldstart-julia-1.13
+          fetch-depth: 0
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: '1.13'
+      - uses: julia-actions/cache@v2
+      - name: Install pinned JETLS
+        run: |
+          julia -e 'using Pkg; Pkg.Apps.add(; url="https://github.com/aviatesk/JETLS.jl", rev="6893fcef26708d64360c048e039102c76ad032c0")'
+          echo "$HOME/.julia/bin" >> "$GITHUB_PATH"
+      - name: Build coverage trace
+        run: |
+          julia --project=. -e 'using Pkg; Pkg.test(coverage=true)'
+          julia -e '
+            using Pkg; Pkg.activate(temp=true); Pkg.add("CoverageTools")
+            using CoverageTools
+            fcs = FileCoverage[]
+            for folder in filter(isdir, ["src", "ext"])
+              append!(fcs, process_folder(folder))
+            end
+            LCOV.writefile("lcov.info", fcs)'
+      - name: Instantiate ratchet tooling
+        run: julia --project=code_ratchet -e 'using Pkg; Pkg.instantiate()'
+      - name: Refresh all baselines deliberately
+        env:
+          COVERAGE_LCOV: ${{ github.workspace }}/lcov.info
+        run: |
+          julia --project=code_ratchet \
+            -e 'using CodeRatchet; try; @eval using JET; catch; end; exit(CodeRatchet.main())' \
+            all refresh --accept-change
+      - name: Verify refreshed baselines
+        env:
+          COVERAGE_LCOV: ${{ github.workspace }}/lcov.info
+        run: |
+          julia --project=code_ratchet \
+            -e 'using CodeRatchet; try; @eval using JET; catch; end; exit(CodeRatchet.main())' \
+            all check
+      - name: Review baseline diff
+        run: git diff -- code_ratchet/*_baseline.toml
+      - name: Commit baselines and remove helper
+        shell: bash
+        run: |
+          git config user.name 'Orjan Ameye'
+          git config user.email 'orjan.ameye@hotmail.com'
+          git rm -f .github/workflows/_refresh-coldstart-baselines.yml
+          git add code_ratchet/*_baseline.toml
+          git commit -m 'chore: refresh cold-start quality baselines'
+          git push origin HEAD:feat/coldstart-julia-1.13

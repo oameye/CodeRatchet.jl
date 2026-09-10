@@ -1,0 +1,73 @@
+# Paired cold-start measurements live in their own workflow rather than in the
+# ordinary ratchet job. Persistent metrics compare one checkout against a
+# committed integer baseline; latency is noisy and must compare exact base and
+# head revisions on the same runner.
+
+name: Cold start
+
+on:
+  workflow_call:
+    inputs:
+      ratchet-dir:
+        description: 'Where rulings.toml and the [coldstart] block live.'
+        type: string
+        default: 'code_ratchet'
+      timeout-minutes:
+        description: 'Cap on the paired cache-build and fresh-process experiment.'
+        type: number
+        default: 120
+
+permissions:
+  contents: read
+
+jobs:
+  compare:
+    name: Compare base and head
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    steps:
+      - name: Check out pull-request base
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.pull_request.base.repo.full_name }}
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: base
+          persist-credentials: false
+
+      - name: Check out pull-request head
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: head
+          persist-credentials: false
+
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: '1.13'
+
+      # CodeRatchet is intentionally installed from the candidate's dedicated
+      # tooling environment. The package under measurement may support older
+      # Julia releases; only the quality tool runs on 1.13.
+      - name: Instantiate CodeRatchet tooling
+        run: >-
+          julia --project="$GITHUB_WORKSPACE/head/${{ inputs.ratchet-dir }}"
+          -e 'using Pkg; Pkg.instantiate()'
+
+      - name: Compare cold-start latency
+        run: |
+          julia --project="$GITHUB_WORKSPACE/head/${{ inputs.ratchet-dir }}" \
+            -e 'using CodeRatchet; exit(CodeRatchet.coldstart_main())' \
+            compare \
+            --base "$GITHUB_WORKSPACE/base" \
+            --head "$GITHUB_WORKSPACE/head" \
+            --ratchet-dir "${{ inputs.ratchet-dir }}" \
+            --output "$GITHUB_WORKSPACE/coldstart-results"
+
+      - name: Upload cold-start results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coderatchet-coldstart
+          path: coldstart-results/
+          if-no-files-found: ignore

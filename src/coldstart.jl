@@ -169,9 +169,7 @@ function scenario_median(
   return median_int(Int[getproperty(row, key) for row in rows])
 end
 
-function precompile_verdict(
-  config::ColdStartConfig, builds::Vector{ColdStartBuild}
-)
+function precompile_verdict(config::ColdStartConfig, builds::Vector{ColdStartBuild})
   baseline = Int[]
   current = Int[]
   regressions = 0
@@ -193,9 +191,7 @@ function precompile_verdict(
 end
 
 function scenario_verdict(
-  config::ColdStartConfig,
-  samples::Vector{ColdStartSample},
-  scenario::AbstractString,
+  config::ColdStartConfig, samples::Vector{ColdStartSample}, scenario::AbstractString
 )
   baseline = Int[]
   current = Int[]
@@ -290,8 +286,17 @@ function Base.show(io::IO, report::ColdStartReport)
   return nothing
 end
 
+"""
+    julia_command(args; dir) -> Cmd
+
+A clean Julia child command using the current executable, not the current
+process flags. `Base.julia_cmd()` deliberately carries options such as coverage,
+check-bounds and debug level into subprocesses; inheriting those would make a
+cold-start result depend on how CodeRatchet itself happened to be launched.
+"""
 function julia_command(args::Vector{String}; dir::AbstractString)
-  cmd = `$(Base.julia_cmd()) --startup-file=no --history-file=no $args`
+  executable = joinpath(Sys.BINDIR, Base.julia_exename())
+  cmd = `$executable --startup-file=no --history-file=no $args`
   return Cmd(cmd; dir=String(dir))
 end
 
@@ -313,9 +318,11 @@ function coldstart_env(
   return setenv(cmd, env)
 end
 
+# JULIA_PKG_PRECOMPILE_AUTO=0 is set before these children start. That keeps
+# this protocol usable on Julia 1.12 too; Pkg.autoprecompilation_enabled(false)
+# is a 1.13 API and would unnecessarily raise CodeRatchet's compatibility floor.
 const PREPARE_ENVIRONMENT = raw"""
 using Pkg
-Pkg.autoprecompilation_enabled(false)
 Pkg.activate(ARGS[1]; io=devnull)
 Pkg.develop(path=ARGS[2]; io=devnull)
 Pkg.instantiate(; io=devnull)
@@ -324,7 +331,6 @@ Pkg.precompile(; io=devnull)
 
 const PRECOMPILE_ENVIRONMENT = raw"""
 using Pkg
-Pkg.autoprecompilation_enabled(false)
 Pkg.activate(ARGS[1]; io=devnull)
 started = time_ns()
 Pkg.precompile(; io=devnull)
@@ -416,10 +422,7 @@ function driver_output(
   scenario::AbstractString="",
 )
   args = String[
-    "--project=$(target.environment)",
-    driver_path(),
-    context.package,
-    context.scenario_file,
+    "--project=$(target.environment)", driver_path(), context.package, context.scenario_file
   ]
   isempty(scenario) || push!(args, String(scenario))
   cmd = julia_command(args; dir=target.checkout)
@@ -507,6 +510,15 @@ function full_commit(root::AbstractString)
   end
 end
 
+function coldstart_file_hash(path::AbstractString)
+  try
+    command = pipeline(`git hash-object --no-filters $path`; stderr=devnull)
+    return strip(read(command, String))
+  catch
+    return "unknown"
+  end
+end
+
 function write_coldstart_results(
   report::ColdStartReport,
   output_dir::AbstractString,
@@ -555,12 +567,16 @@ function write_coldstart_results(
   end
 
   write(joinpath(output_dir, "summary.md"), coldstart_markdown(report))
+  scenario_file =
+    isabspath(report.config.scenarios) ? report.config.scenarios : joinpath(head, report.config.scenarios)
   open(joinpath(output_dir, "metadata.txt"), "w") do io
     println(io, "julia=", VERSION)
     println(io, "sysimage_target=", Sys.sysimage_target())
     println(io, "machine=", Sys.MACHINE)
+    println(io, "runner_image=", get(ENV, "ImageVersion", "unknown"))
     println(io, "base_commit=", full_commit(base))
     println(io, "head_commit=", full_commit(head))
+    println(io, "scenario_hash=", coldstart_file_hash(scenario_file))
     println(io, "builds=", report.config.builds)
     println(io, "samples=", report.config.samples)
     println(io, "absolute_ns=", report.config.absolute_ns)
@@ -583,11 +599,7 @@ end
 
 function run_context(context::ColdStartContext, scenarios::Vector{String})
   return ColdStartContext(
-    context.package,
-    context.scenario_file,
-    context.config,
-    context.seed_depot,
-    scenarios,
+    context.package, context.scenario_file, context.config, context.seed_depot, scenarios
   )
 end
 
@@ -713,14 +725,15 @@ function coldstart_compare(
     error("cold-start checkouts name different packages: $base_identity != $head_identity")
   package = head_identity.name
 
-  config_dir = isabspath(ratchet_dir) ? String(ratchet_dir) : joinpath(head_path, ratchet_dir)
+  config_dir =
+    isabspath(ratchet_dir) ? String(ratchet_dir) : joinpath(head_path, ratchet_dir)
   config = coldstart_config(head_path; dir=config_dir)
   scenario_file =
     isabspath(config.scenarios) ? config.scenarios : joinpath(head_path, config.scenarios)
   isfile(scenario_file) || error("cold-start scenario registry not found: $scenario_file")
 
   scenarios, builds, samples = mktempdir() do temporary
-    run_coldstart_experiment(
+    return run_coldstart_experiment(
       base_path, head_path, package, scenario_file, config, temporary
     )
   end

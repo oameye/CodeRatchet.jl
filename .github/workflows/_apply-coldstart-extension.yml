@@ -1,0 +1,39 @@
+name: Apply cold-start extension refactor
+
+on:
+  push:
+    branches: [feat/coldstart-julia-1.13]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Apply validated refactor
+        run: python scripts/apply_coldstart_extension.py
+
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: '1.13'
+
+      - name: Format transformed Julia sources
+        run: |
+          julia -e 'using Pkg; Pkg.add(name="JuliaFormatter", version="2")'
+          julia -e 'using JuliaFormatter; format(".")'
+
+      - name: Remove validation scaffolding and commit
+        run: |
+          rm -f \
+            .github/workflows/_apply-coldstart-extension.yml \
+            .github/workflows/_validate-coldstart-extension.yml \
+            scripts/apply_coldstart_extension.py
+          git diff --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "perf: keep cold-start harness out of core precompile"
+          git push

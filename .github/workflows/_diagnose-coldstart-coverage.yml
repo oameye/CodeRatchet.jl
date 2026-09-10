@@ -1,0 +1,28 @@
+name: Diagnose cold-start coverage
+
+on:
+  push:
+    branches: [feat/coldstart-julia-1.13]
+    paths:
+      - .github/workflows/_diagnose-coldstart-coverage.yml
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: '1.13'
+      - name: Build coverage
+        run: julia --project=. -e 'using Pkg; Pkg.test(coverage=true)'
+      - name: Print uncovered cold-start lines
+        shell: bash
+        run: |
+          for f in src/coldstart.jl.*.cov; do
+            echo "FILE=$f"
+            awk '$1 == "0" { print NR ":" $0 }' "$f"
+          done

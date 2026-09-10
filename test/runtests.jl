@@ -168,6 +168,22 @@ reason = "Test code."
     )
   end
 
+  @testset "an existing empty baseline still binds provenance" begin
+    root = gitrepo(Dict("test/t.jl" => "using Test\n"); rulings=SRC_ONLY)
+    metric = Complexity()
+    refresh(metric, root)
+    dir = joinpath(root, "code_ratchet")
+    path = CodeRatchet.baseline_path(metric, dir)
+    text = read(path, String)
+    write(path, replace(text, "schema = 1" => "schema = 999"))
+
+    report = check(metric, root; dir)
+    @test !report.bootstrap
+    @test !ok(report)
+    @test any(msg -> occursin("provenance moved", msg), report.rulings)
+    @test_throws ErrorException refresh(metric, root; dir)
+  end
+
   @testset "backend versions are semantic provenance" begin
     root = gitrepo(Dict("src/a.jl" => "f() = 1\n"); rulings=SRC_ONLY)
     p = CodeRatchet.provenance(Complexity(), root)

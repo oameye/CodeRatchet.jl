@@ -5,7 +5,7 @@
 [provenance]
 attribution = "method_definition_file"
 binding = ["boxes"]
-commit = "46d944f"
+commit = "e0ecbba"
 direction = ["down"]
 julia = "1.13"
 metric = "boxes"

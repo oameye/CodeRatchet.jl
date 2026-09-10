@@ -4,7 +4,7 @@
 
 [provenance]
 binding = ["union_nothing", "underscore_name", "implicit_kwarg"]
-commit = "46d944f"
+commit = "e0ecbba"
 direction = ["down", "down", "down"]
 metric = "style"
 rules = ["implicit_kwarg", "underscore_name", "union_nothing"]

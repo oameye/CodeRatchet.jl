@@ -5,7 +5,7 @@
 [provenance]
 aggregation = "max_and_count_over_threshold"
 binding = ["cyc", "cog", "arg", "cyc_over", "cog_over", "arg_over"]
-commit = "46d944f"
+commit = "e0ecbba"
 direction = ["down", "down", "down", "down", "down", "down"]
 metric = "complexity"
 schema = 1

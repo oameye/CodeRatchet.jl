@@ -600,7 +600,7 @@ function check(
   ruling_bad = ruling_failures(metric, root)
 
   # No baseline at all is the bootstrap case, not a wall of failures.
-  if baseline === nothing || isempty(baseline)
+  if baseline === nothing
     return Report(
       metric_name(metric),
       Violation[],
@@ -670,7 +670,7 @@ function refresh(
   )
 
   baseline, recorded = read_baseline(metric, dir)
-  provenance_bad = if baseline === nothing || isempty(baseline)
+  provenance_bad = if baseline === nothing
     String[]
   else
     provenance_failures(metric, recorded, root)

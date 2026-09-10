@@ -17,11 +17,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # CodeRatchet is a tooling environment of its own. 1.13 is the
-        # reference runtime so compiler-facing gates can use its Pkg and
-        # introspection facilities without constraining the Julia versions
-        # supported by the package under measurement.
-        julia: ['1.13']
+        # Keep the package compatible with its existing 1.12 floor while
+        # exercising 1.13 explicitly. Compiler-facing reusable workflows use
+        # 1.13 as their reference runtime below.
+        julia: ['1.12', '1.13']
         os: [ubuntu-latest]
     steps:
       - uses: actions/checkout@v4

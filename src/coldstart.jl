@@ -57,6 +57,14 @@ struct ColdStartEnvironment
   manifest::String
 end
 
+struct ColdStartProvenance
+  base::String
+  head::String
+  scenario_file::String
+  scenario_source::String
+  config_source::String
+end
+
 struct ColdStartReport
   config::ColdStartConfig
   scenarios::Vector{String}
@@ -625,13 +633,7 @@ function coldstart_scenario_file(
 end
 
 function write_coldstart_results(
-  report::ColdStartReport,
-  output_dir::AbstractString,
-  base::AbstractString,
-  head::AbstractString;
-  scenario_file::AbstractString,
-  scenario_source::AbstractString,
-  config_source::AbstractString,
+  report::ColdStartReport, output_dir::AbstractString, provenance::ColdStartProvenance
 )
   mkpath(output_dir)
 
@@ -694,13 +696,13 @@ function write_coldstart_results(
     println(io, "sysimage_target=", sysimage_target)
     println(io, "machine=", Sys.MACHINE)
     println(io, "runner_image=", get(ENV, "ImageVersion", "unknown"))
-    println(io, "base_commit=", full_commit(base))
-    println(io, "head_commit=", full_commit(head))
-    println(io, "config_source=", config_source)
+    println(io, "base_commit=", full_commit(provenance.base))
+    println(io, "head_commit=", full_commit(provenance.head))
+    println(io, "config_source=", provenance.config_source)
     println(io, "config_hash=", coldstart_config_hash(report.config))
-    println(io, "scenario_source=", scenario_source)
+    println(io, "scenario_source=", provenance.scenario_source)
     println(io, "scenario_path=", report.config.scenarios)
-    println(io, "scenario_hash=", coldstart_file_hash(scenario_file))
+    println(io, "scenario_hash=", coldstart_file_hash(provenance.scenario_file))
     println(io, "builds=", report.config.builds)
     println(io, "samples=", report.config.samples)
     println(io, "absolute_ns=", report.config.absolute_ns)
@@ -895,14 +897,9 @@ function coldstart_compare(
 
   verdicts = coldstart_verdicts(config, scenarios, builds, samples)
   report = ColdStartReport(config, scenarios, builds, samples, verdicts, environments)
-  isempty(output_dir) || write_coldstart_results(
-    report,
-    output_dir,
-    base_path,
-    head_path;
-    scenario_file=scenario.file,
-    scenario_source=scenario.source,
-    config_source=selection.source,
+  provenance = ColdStartProvenance(
+    base_path, head_path, scenario.file, scenario.source, selection.source
   )
+  isempty(output_dir) || write_coldstart_results(report, output_dir, provenance)
   return report
 end

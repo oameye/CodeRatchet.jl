@@ -92,6 +92,33 @@ end
     end
   end
 
+  @testset "default configuration also follows base precedence" begin
+    mktempdir() do root
+      base = joinpath(root, "base")
+      head = joinpath(root, "head")
+      base_dir = joinpath(base, "code_ratchet")
+      head_dir = joinpath(head, "code_ratchet")
+      mkpath(base_dir)
+      mkpath(head_dir)
+
+      write(joinpath(base_dir, "rulings.toml"), "[scope]\nmeasure = [\"src/\"]\n")
+      selection = CodeRatchet.coldstart_config_selection(base, head, "code_ratchet")
+      @test selection.source == "base-default"
+      @test selection.config.builds == 2
+
+      rm(joinpath(base_dir, "rulings.toml"))
+      write(joinpath(head_dir, "rulings.toml"), "[scope]\nmeasure = [\"src/\"]\n")
+      selection = CodeRatchet.coldstart_config_selection(base, head, "code_ratchet")
+      @test selection.source == "head-default"
+      @test selection.config.builds == 2
+
+      rm(joinpath(head_dir, "rulings.toml"))
+      @test_throws ErrorException CodeRatchet.coldstart_config_selection(
+        base, head, "code_ratchet"
+      )
+    end
+  end
+
   @testset "scenario registry is frozen to base after bootstrap" begin
     mktempdir() do root
       base = joinpath(root, "base")
@@ -241,6 +268,15 @@ end
     end
   end
 
+  @testset "project identity requires string name and uuid" begin
+    mktempdir() do root
+      write(joinpath(root, "Project.toml"), "name = 1\nuuid = \"abc\"\n")
+      @test_throws ErrorException CodeRatchet.project_identity(root)
+      write(joinpath(root, "Project.toml"), "name = \"Tiny\"\nuuid = 1\n")
+      @test_throws ErrorException CodeRatchet.project_identity(root)
+    end
+  end
+
   @testset "results carry runtime and scenario provenance" begin
     config = CodeRatchet.ColdStartConfig("scenarios.jl", 1, 1, 50_000_000, 0.05, 1)
     builds = [
@@ -257,15 +293,10 @@ end
         "nothing
 ",
       )
-      CodeRatchet.write_coldstart_results(
-        report,
-        output,
-        pwd(),
-        pwd();
-        scenario_file,
-        scenario_source="base",
-        config_source="base",
+      provenance = CodeRatchet.ColdStartProvenance(
+        pwd(), pwd(), scenario_file, "base", "base"
       )
+      CodeRatchet.write_coldstart_results(report, output, provenance)
       @test isfile(joinpath(output, "builds.tsv"))
       @test isfile(joinpath(output, "samples.tsv"))
       @test isfile(joinpath(output, "summary.md"))

@@ -1,8 +1,12 @@
 using Test
+using Pkg
 using CodeRatchet
 
+const ColdStartExt = Base.get_extension(CodeRatchet, :CodeRatchetColdStartExt)
+ColdStartExt === nothing && error("CodeRatchet cold-start extension did not load")
+
 function sample(variant, build, sample_id, scenario, total_ns; compile_ns=10_000_000)
-  return CodeRatchet.ColdStartSample(
+  return ColdStartExt.ColdStartSample(
     variant,
     build,
     sample_id,
@@ -24,7 +28,7 @@ end
       dir = joinpath(root, "code_ratchet")
       mkpath(dir)
       write(joinpath(dir, "rulings.toml"), "[scope]\nmeasure = [\"src/\"]\n")
-      config = CodeRatchet.coldstart_config(root; dir)
+      config = ColdStartExt.coldstart_config(root; dir)
       @test config.scenarios == "benchmark/precompile/scenarios.jl"
       @test config.builds == 2
       @test config.samples == 5
@@ -44,7 +48,7 @@ end
         precompile_tasks = 2
         """,
       )
-      config = CodeRatchet.coldstart_config(root; dir)
+      config = ColdStartExt.coldstart_config(root; dir)
       @test config.scenarios == "bench/scenarios.jl"
       @test config.builds == 3
       @test config.samples == 7
@@ -53,17 +57,17 @@ end
       @test config.precompile_tasks == 2
 
       write(joinpath(dir, "rulings.toml"), "[coldstart]\nbuilds = 0\n")
-      @test_throws ErrorException CodeRatchet.coldstart_config(root; dir)
+      @test_throws ErrorException ColdStartExt.coldstart_config(root; dir)
       write(joinpath(dir, "rulings.toml"), "[coldstart]\nbuilds = \"many\"\n")
-      @test_throws ErrorException CodeRatchet.coldstart_config(root; dir)
+      @test_throws ErrorException ColdStartExt.coldstart_config(root; dir)
       write(joinpath(dir, "rulings.toml"), "[coldstart]\nabsolute_ms = \"slow\"\n")
-      @test_throws ErrorException CodeRatchet.coldstart_config(root; dir)
+      @test_throws ErrorException ColdStartExt.coldstart_config(root; dir)
       write(joinpath(dir, "rulings.toml"), "[coldstart]\nabsolute_ms = -1\n")
-      @test_throws ErrorException CodeRatchet.coldstart_config(root; dir)
+      @test_throws ErrorException ColdStartExt.coldstart_config(root; dir)
       write(joinpath(dir, "rulings.toml"), "[coldstart]\nrelative = \"large\"\n")
-      @test_throws ErrorException CodeRatchet.coldstart_config(root; dir)
+      @test_throws ErrorException ColdStartExt.coldstart_config(root; dir)
       write(joinpath(dir, "rulings.toml"), "[coldstart]\nrelative = 1.0\n")
-      @test_throws ErrorException CodeRatchet.coldstart_config(root; dir)
+      @test_throws ErrorException ColdStartExt.coldstart_config(root; dir)
     end
   end
 
@@ -77,16 +81,16 @@ end
       mkpath(head_dir)
       write(joinpath(base_dir, "rulings.toml"), "[scope]\nmeasure = [\"src/\"]\n")
       write(joinpath(head_dir, "rulings.toml"), "[coldstart]\nbuilds = 3\nsamples = 1\n")
-      selection = CodeRatchet.coldstart_config_selection(base, head, "code_ratchet")
+      selection = ColdStartExt.coldstart_config_selection(base, head, "code_ratchet")
       @test selection.source == "head-bootstrap"
       @test selection.config.builds == 3
 
       write(joinpath(base_dir, "rulings.toml"), "[coldstart]\nbuilds = 2\nsamples = 1\n")
-      selection = CodeRatchet.coldstart_config_selection(base, head, "code_ratchet")
+      selection = ColdStartExt.coldstart_config_selection(base, head, "code_ratchet")
       @test selection.source == "base"
       @test selection.config.builds == 2
 
-      selection = CodeRatchet.coldstart_config_selection(base, head, head_dir)
+      selection = ColdStartExt.coldstart_config_selection(base, head, head_dir)
       @test selection.source == "absolute"
       @test selection.config.builds == 3
     end
@@ -102,18 +106,18 @@ end
       mkpath(head_dir)
 
       write(joinpath(base_dir, "rulings.toml"), "[scope]\nmeasure = [\"src/\"]\n")
-      selection = CodeRatchet.coldstart_config_selection(base, head, "code_ratchet")
+      selection = ColdStartExt.coldstart_config_selection(base, head, "code_ratchet")
       @test selection.source == "base-default"
       @test selection.config.builds == 2
 
       rm(joinpath(base_dir, "rulings.toml"))
       write(joinpath(head_dir, "rulings.toml"), "[scope]\nmeasure = [\"src/\"]\n")
-      selection = CodeRatchet.coldstart_config_selection(base, head, "code_ratchet")
+      selection = ColdStartExt.coldstart_config_selection(base, head, "code_ratchet")
       @test selection.source == "head-default"
       @test selection.config.builds == 2
 
       rm(joinpath(head_dir, "rulings.toml"))
-      @test_throws ErrorException CodeRatchet.coldstart_config_selection(
+      @test_throws ErrorException ColdStartExt.coldstart_config_selection(
         base, head, "code_ratchet"
       )
     end
@@ -125,14 +129,14 @@ end
       head = joinpath(root, "head")
       mkpath(base)
       mkpath(head)
-      config = CodeRatchet.ColdStartConfig("scenarios.jl", 1, 1, 0, 0.0, 1)
+      config = ColdStartExt.ColdStartConfig("scenarios.jl", 1, 1, 0, 0.0, 1)
 
       write(
         joinpath(head, "scenarios.jl"),
         "head
 ",
       )
-      scenario = CodeRatchet.coldstart_scenario_file(base, head, config)
+      scenario = ColdStartExt.coldstart_scenario_file(base, head, config)
       @test scenario.source == "head-bootstrap"
       @test scenario.file == joinpath(head, "scenarios.jl")
 
@@ -141,114 +145,114 @@ end
         "base
 ",
       )
-      scenario = CodeRatchet.coldstart_scenario_file(base, head, config)
+      scenario = ColdStartExt.coldstart_scenario_file(base, head, config)
       @test scenario.source == "base"
       @test scenario.file == joinpath(base, "scenarios.jl")
 
       absolute = joinpath(root, "absolute-scenarios.jl")
       write(absolute, "absolute\n")
-      absolute_config = CodeRatchet.ColdStartConfig(absolute, 1, 1, 0, 0.0, 1)
-      scenario = CodeRatchet.coldstart_scenario_file(base, head, absolute_config)
+      absolute_config = ColdStartExt.ColdStartConfig(absolute, 1, 1, 0, 0.0, 1)
+      scenario = ColdStartExt.coldstart_scenario_file(base, head, absolute_config)
       @test scenario.source == "absolute"
       @test scenario.file == absolute
-      missing_config = CodeRatchet.ColdStartConfig(
+      missing_config = ColdStartExt.ColdStartConfig(
         joinpath(root, "missing.jl"), 1, 1, 0, 0.0, 1
       )
-      @test_throws ErrorException CodeRatchet.coldstart_scenario_file(
+      @test_throws ErrorException ColdStartExt.coldstart_scenario_file(
         base, head, missing_config
       )
     end
   end
 
   @testset "base and head must expose the same ordered workload registry" begin
-    @test CodeRatchet.matching_scenarios(["a", "b"], ["a", "b"]) == ["a", "b"]
-    @test_throws ErrorException CodeRatchet.matching_scenarios(["a"], ["b"])
-    @test_throws ErrorException CodeRatchet.matching_scenarios(["a", "b"], ["b", "a"])
+    @test ColdStartExt.matching_scenarios(["a", "b"], ["a", "b"]) == ["a", "b"]
+    @test_throws ErrorException ColdStartExt.matching_scenarios(["a"], ["b"])
+    @test_throws ErrorException ColdStartExt.matching_scenarios(["a", "b"], ["b", "a"])
   end
 
   @testset "median and materiality are exact" begin
-    @test CodeRatchet.median_int([9, 1, 5]) == 5
-    @test CodeRatchet.median_int([1, 3, 7, 9]) == 5
-    @test_throws ErrorException CodeRatchet.median_int(Int[])
+    @test ColdStartExt.median_int([9, 1, 5]) == 5
+    @test ColdStartExt.median_int([1, 3, 7, 9]) == 5
+    @test_throws ErrorException ColdStartExt.median_int(Int[])
 
-    config = CodeRatchet.ColdStartConfig("scenarios.jl", 2, 3, 50_000_000, 0.05, 1)
-    @test CodeRatchet.material_threshold(config, 200_000_000) == 50_000_000
-    @test CodeRatchet.material_threshold(config, 2_000_000_000) == 100_000_000
-    @test CodeRatchet.material_regression(config, 1_000_000_000, 1_050_000_000)
-    @test !CodeRatchet.material_regression(config, 1_000_000_000, 1_049_999_999)
+    config = ColdStartExt.ColdStartConfig("scenarios.jl", 2, 3, 50_000_000, 0.05, 1)
+    @test ColdStartExt.material_threshold(config, 200_000_000) == 50_000_000
+    @test ColdStartExt.material_threshold(config, 2_000_000_000) == 100_000_000
+    @test ColdStartExt.material_regression(config, 1_000_000_000, 1_050_000_000)
+    @test !ColdStartExt.material_regression(config, 1_000_000_000, 1_049_999_999)
   end
 
   @testset "a noisy signal fails only when every independent build regresses" begin
-    config = CodeRatchet.ColdStartConfig("scenarios.jl", 2, 3, 50_000_000, 0.05, 1)
+    config = ColdStartExt.ColdStartConfig("scenarios.jl", 2, 3, 50_000_000, 0.05, 1)
     builds = [
-      CodeRatchet.ColdStartBuild("base", 1, 1_000_000_000, 100),
-      CodeRatchet.ColdStartBuild("head", 1, 1_100_000_000, 110),
-      CodeRatchet.ColdStartBuild("base", 2, 1_000_000_000, 100),
-      CodeRatchet.ColdStartBuild("head", 2, 1_020_000_000, 110),
+      ColdStartExt.ColdStartBuild("base", 1, 1_000_000_000, 100),
+      ColdStartExt.ColdStartBuild("head", 1, 1_100_000_000, 110),
+      ColdStartExt.ColdStartBuild("base", 2, 1_000_000_000, 100),
+      ColdStartExt.ColdStartBuild("head", 2, 1_020_000_000, 110),
     ]
-    samples = CodeRatchet.ColdStartSample[]
+    samples = ColdStartExt.ColdStartSample[]
     for build in 1:2, sample_id in 1:3
       push!(samples, sample("base", build, sample_id, "solve", 500_000_000))
       push!(samples, sample("head", build, sample_id, "solve", 600_000_000))
     end
 
-    verdicts = CodeRatchet.coldstart_verdicts(config, ["solve"], builds, samples)
+    verdicts = ColdStartExt.coldstart_verdicts(config, ["solve"], builds, samples)
     precompile, solve = verdicts
     @test precompile.regressed_builds == 1
     @test !precompile.failed
     @test solve.regressed_builds == 2
     @test solve.failed
 
-    report = CodeRatchet.ColdStartReport(config, ["solve"], builds, samples, verdicts)
-    @test !CodeRatchet.ok(report)
+    report = ColdStartExt.ColdStartReport(config, ["solve"], builds, samples, verdicts)
+    @test !ColdStartExt.ok(report)
     @test occursin("CodeRatchet coldstart: FAIL", sprint(show, report))
-    markdown = CodeRatchet.coldstart_markdown(report)
+    markdown = ColdStartExt.coldstart_markdown(report)
     @test occursin("| precompile |", markdown)
     @test occursin("| solve |", markdown)
     @test occursin("FAIL", markdown)
   end
 
   @testset "compiler decomposition is context, not an independent noisy gate" begin
-    config = CodeRatchet.ColdStartConfig("scenarios.jl", 1, 1, 50_000_000, 0.05, 1)
+    config = ColdStartExt.ColdStartConfig("scenarios.jl", 1, 1, 50_000_000, 0.05, 1)
     builds = [
-      CodeRatchet.ColdStartBuild("base", 1, 100_000_000, 100),
-      CodeRatchet.ColdStartBuild("head", 1, 100_000_000, 200),
+      ColdStartExt.ColdStartBuild("base", 1, 100_000_000, 100),
+      ColdStartExt.ColdStartBuild("head", 1, 100_000_000, 200),
     ]
     samples = [
       sample("base", 1, 1, "solve", 500_000_000; compile_ns=1_000_000),
       sample("head", 1, 1, "solve", 500_000_000; compile_ns=400_000_000),
     ]
-    verdicts = CodeRatchet.coldstart_verdicts(config, ["solve"], builds, samples)
-    report = CodeRatchet.ColdStartReport(config, ["solve"], builds, samples, verdicts)
-    @test CodeRatchet.ok(report)
+    verdicts = ColdStartExt.coldstart_verdicts(config, ["solve"], builds, samples)
+    report = ColdStartExt.ColdStartReport(config, ["solve"], builds, samples, verdicts)
+    @test ColdStartExt.ok(report)
     @test all(!verdict.failed for verdict in verdicts)
   end
 
   @testset "driver rows parse into integer nanosecond observations" begin
     output = "noise\nRESULT\tsolve\t10\t20\t5\t1\t30\t2\t0\t0\n"
-    target = CodeRatchet.ColdStartTarget("head", pwd(), pwd())
-    parsed = CodeRatchet.parse_sample(output, target, 2, 3, "solve")
+    target = ColdStartExt.ColdStartTarget("head", pwd(), pwd())
+    parsed = ColdStartExt.parse_sample(output, target, 2, 3, "solve")
     @test parsed.variant == "head"
     @test parsed.build == 2
     @test parsed.sample == 3
     @test parsed.total_ns == 30
     @test parsed.recompile_ns == 1
-    @test_throws ErrorException CodeRatchet.parse_sample(output, target, 2, 3, "other")
+    @test_throws ErrorException ColdStartExt.parse_sample(output, target, 2, 3, "other")
   end
 
   @testset "child Julia commands do not inherit parent instrumentation" begin
-    cmd = CodeRatchet.julia_command(["--version"]; dir=pwd())
+    cmd = ColdStartExt.julia_command(["--version"]; dir=pwd())
     rendered = string(cmd)
     @test occursin("--startup-file=no", rendered)
     @test occursin("--history-file=no", rendered)
     @test !occursin("--code-coverage", rendered)
     @test !occursin("--check-bounds", rendered)
-    cached = CodeRatchet.julia_command(["--version"]; dir=pwd(), existing_caches=true)
+    cached = ColdStartExt.julia_command(["--version"]; dir=pwd(), existing_caches=true)
     cached_rendered = string(cached)
     @test occursin("--compiled-modules=existing", cached_rendered)
     @test occursin("--pkgimages=existing", cached_rendered)
     @test occursin(
-      "Pkg.precompile(ARGS[2]; strict=true", CodeRatchet.PRECOMPILE_ENVIRONMENT
+      "Pkg.precompile(ARGS[2]; strict=true", ColdStartExt.PRECOMPILE_ENVIRONMENT
     )
   end
 
@@ -261,9 +265,9 @@ end
       mkpath(other)
       write(joinpath(target, "a.ji"), "12345")
       write(joinpath(other, "b.ji"), "123456789")
-      @test CodeRatchet.package_cache_bytes(depot, "Tiny") == 5
-      CodeRatchet.remove_package_cache(depot, "Tiny")
-      @test CodeRatchet.package_cache_bytes(depot, "Tiny") == 0
+      @test ColdStartExt.package_cache_bytes(depot, "Tiny") == 5
+      ColdStartExt.remove_package_cache(depot, "Tiny")
+      @test ColdStartExt.package_cache_bytes(depot, "Tiny") == 0
       @test isfile(joinpath(other, "b.ji"))
     end
   end
@@ -271,21 +275,21 @@ end
   @testset "project identity requires string name and uuid" begin
     mktempdir() do root
       write(joinpath(root, "Project.toml"), "name = 1\nuuid = \"abc\"\n")
-      @test_throws ErrorException CodeRatchet.project_identity(root)
+      @test_throws ErrorException ColdStartExt.project_identity(root)
       write(joinpath(root, "Project.toml"), "name = \"Tiny\"\nuuid = 1\n")
-      @test_throws ErrorException CodeRatchet.project_identity(root)
+      @test_throws ErrorException ColdStartExt.project_identity(root)
     end
   end
 
   @testset "results carry runtime and scenario provenance" begin
-    config = CodeRatchet.ColdStartConfig("scenarios.jl", 1, 1, 50_000_000, 0.05, 1)
+    config = ColdStartExt.ColdStartConfig("scenarios.jl", 1, 1, 50_000_000, 0.05, 1)
     builds = [
-      CodeRatchet.ColdStartBuild("base", 1, 100, 10),
-      CodeRatchet.ColdStartBuild("head", 1, 90, 11),
+      ColdStartExt.ColdStartBuild("base", 1, 100, 10),
+      ColdStartExt.ColdStartBuild("head", 1, 90, 11),
     ]
     samples = [sample("base", 1, 1, "solve", 100), sample("head", 1, 1, "solve", 90)]
-    verdicts = CodeRatchet.coldstart_verdicts(config, ["solve"], builds, samples)
-    report = CodeRatchet.ColdStartReport(config, ["solve"], builds, samples, verdicts)
+    verdicts = ColdStartExt.coldstart_verdicts(config, ["solve"], builds, samples)
+    report = ColdStartExt.ColdStartReport(config, ["solve"], builds, samples, verdicts)
     mktempdir() do output
       scenario_file = joinpath(output, "scenarios.jl")
       write(
@@ -293,10 +297,10 @@ end
         "nothing
 ",
       )
-      provenance = CodeRatchet.ColdStartProvenance(
+      provenance = ColdStartExt.ColdStartProvenance(
         pwd(), pwd(), scenario_file, "base", "base"
       )
-      CodeRatchet.write_coldstart_results(report, output, provenance)
+      ColdStartExt.write_coldstart_results(report, output, provenance)
       @test isfile(joinpath(output, "builds.tsv"))
       @test isfile(joinpath(output, "samples.tsv"))
       @test isfile(joinpath(output, "summary.md"))
@@ -328,14 +332,14 @@ end
       "--output",
       "/output",
     ]
-    options = CodeRatchet.parse_coldstart_options(args)
+    options = ColdStartExt.parse_coldstart_options(args)
     @test options.base == "/base"
     @test options.head == "/head"
     @test options.ratchet_dir == "/ratchet"
     @test options.output == "/output"
-    @test_throws ArgumentError CodeRatchet.parse_coldstart_options(["compare"])
-    @test_throws ArgumentError CodeRatchet.parse_coldstart_options(["compare", "--base"])
-    @test_throws ArgumentError CodeRatchet.parse_coldstart_options([
+    @test_throws ArgumentError ColdStartExt.parse_coldstart_options(["compare"])
+    @test_throws ArgumentError ColdStartExt.parse_coldstart_options(["compare", "--base"])
+    @test_throws ArgumentError ColdStartExt.parse_coldstart_options([
       "compare", "--wat", "value", "--base", "/base"
     ])
   end

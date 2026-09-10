@@ -20,6 +20,23 @@ using JuliaSyntax: JuliaSyntax
 using TOML: TOML
 
 export Boxes, Complexity, Coverage, Docstrings, Lsp, Style, check, refresh
+export coldstart_compare, coldstart_main
+
+"""
+    coldstart_compare(base, head; kwargs...)
+
+Run the optional paired cold-start comparison. Load `Pkg` to activate the
+cold-start extension before calling this function.
+"""
+function coldstart_compare end
+
+"""
+    coldstart_main(args=ARGS) -> Int
+
+Command entry point for the optional paired cold-start comparison. Load `Pkg`
+to activate the cold-start extension before calling this function.
+"""
+function coldstart_main end
 
 """
     oneof(x, options) -> Bool

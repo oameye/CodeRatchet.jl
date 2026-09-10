@@ -208,7 +208,7 @@ The same experiment can be run locally against two checkouts:
 
 ```sh
 julia --project=code_ratchet \
-  -e 'using CodeRatchet; exit(CodeRatchet.coldstart_main())' \
+  -e 'using Pkg, CodeRatchet; exit(CodeRatchet.coldstart_main())' \
   compare --base /path/to/base --head /path/to/head \
   --output coldstart-results
 ```

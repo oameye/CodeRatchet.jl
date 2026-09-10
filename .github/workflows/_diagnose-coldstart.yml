@@ -36,8 +36,13 @@ jobs:
         run: |
           echo '=== COMPLEXITY ==='
           julia --project=code_ratchet -e 'using CodeRatchet; exit(CodeRatchet.main(["complexity", "candidates"]))' || true
-          echo '=== COVERAGE ==='
+          echo '=== COVERAGE TOTALS ==='
           julia --project=code_ratchet -e 'using CodeRatchet; exit(CodeRatchet.main(["coverage", "terminal"]))' || true
+          echo '=== COVERAGE ZERO-HIT LINES ==='
+          awk '
+            /^SF:/ { file=substr($0,4); wanted=(file ~ /src\/coldstart(_cli)?\.jl$/) }
+            wanted && /^DA:/ { split(substr($0,4), a, ","); if (a[2] == 0) print file ":" a[1] }
+          ' lcov.info
           echo '=== LSP ==='
           julia --project=code_ratchet -e 'using CodeRatchet; exit(CodeRatchet.main(["lsp", "report"]))' || true
           echo '=== JET ==='

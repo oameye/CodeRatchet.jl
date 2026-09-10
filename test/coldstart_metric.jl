@@ -1,8 +1,8 @@
 using Test
 using CodeRatchet
 
-sample(variant, build, sample_id, scenario, total_ns; compile_ns=10_000_000) =
-  CodeRatchet.ColdStartSample(
+function sample(variant, build, sample_id, scenario, total_ns; compile_ns=10_000_000)
+  return CodeRatchet.ColdStartSample(
     variant,
     build,
     sample_id,
@@ -16,6 +16,7 @@ sample(variant, build, sample_id, scenario, total_ns; compile_ns=10_000_000) =
     0,
     0,
   )
+end
 
 @testset "cold-start comparison" begin
   @testset "configuration has conservative defaults and validates overrides" begin

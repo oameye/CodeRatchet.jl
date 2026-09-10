@@ -57,7 +57,7 @@ jobs:
       - name: Compare cold-start latency
         run: |
           julia --project="$GITHUB_WORKSPACE/head/${{ inputs.ratchet-dir }}" \
-            -e 'using CodeRatchet; exit(CodeRatchet.coldstart_main())' \
+            -e 'using Pkg, CodeRatchet; exit(CodeRatchet.coldstart_main())' \
             compare \
             --base "$GITHUB_WORKSPACE/base" \
             --head "$GITHUB_WORKSPACE/head" \

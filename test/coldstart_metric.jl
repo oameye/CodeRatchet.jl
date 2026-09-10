@@ -129,10 +129,20 @@ end
     @test_throws ErrorException CodeRatchet.parse_sample(output, target, 2, 3, "other")
   end
 
+  @testset "child Julia commands do not inherit parent instrumentation" begin
+    cmd = CodeRatchet.julia_command(["--version"]; dir=pwd())
+    rendered = string(cmd)
+    @test occursin("--startup-file=no", rendered)
+    @test occursin("--history-file=no", rendered)
+    @test !occursin("--code-coverage", rendered)
+    @test !occursin("--check-bounds", rendered)
+  end
+
   @testset "cache helpers measure and remove only the target package" begin
     mktempdir() do depot
-      target = joinpath(depot, "compiled", "v1.13", "Tiny")
-      other = joinpath(depot, "compiled", "v1.13", "Other")
+      version_dir = "v$(VERSION.major).$(VERSION.minor)"
+      target = joinpath(depot, "compiled", version_dir, "Tiny")
+      other = joinpath(depot, "compiled", version_dir, "Other")
       mkpath(target)
       mkpath(other)
       write(joinpath(target, "a.ji"), "12345")
@@ -144,7 +154,7 @@ end
     end
   end
 
-  @testset "results are written with Julia 1.13 compiler provenance" begin
+  @testset "results carry runtime and scenario provenance" begin
     config = CodeRatchet.ColdStartConfig("scenarios.jl", 1, 1, 50_000_000, 0.05, 1)
     builds = [
       CodeRatchet.ColdStartBuild("base", 1, 100, 10),
@@ -159,8 +169,10 @@ end
       @test isfile(joinpath(output, "samples.tsv"))
       @test isfile(joinpath(output, "summary.md"))
       metadata = read(joinpath(output, "metadata.txt"), String)
-      @test occursin("julia=1.13", metadata)
+      @test occursin("julia=$(VERSION)", metadata)
       @test occursin("sysimage_target=", metadata)
+      @test occursin("runner_image=", metadata)
+      @test occursin("scenario_hash=", metadata)
     end
   end
 
@@ -255,6 +267,8 @@ end
       @test countlines(joinpath(output, "builds.tsv")) == 3
       @test countlines(joinpath(output, "samples.tsv")) == 3
       @test occursin("| smoke |", read(joinpath(output, "summary.md"), String))
+      metadata = read(joinpath(output, "metadata.txt"), String)
+      @test !occursin("scenario_hash=unknown", metadata)
     end
   end
 

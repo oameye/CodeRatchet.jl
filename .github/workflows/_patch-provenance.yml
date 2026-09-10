@@ -24,7 +24,7 @@ jobs:
       - name: Format and test implementation
         run: |
           julia -e 'using Pkg; Pkg.add(name="JuliaFormatter", version="2")'
-          julia -e 'using JuliaFormatter; format("src/CodeRatchet.jl"); format("src/complexity.jl"); format("ext/CodeRatchetJETExt.jl"); format("test/runtests.jl")'
+          julia -e 'using JuliaFormatter; format(".")'
           julia --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.test()'
       - name: Re-render existing numeric baselines
         run: |
@@ -47,6 +47,6 @@ jobs:
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add src/CodeRatchet.jl src/complexity.jl ext/CodeRatchetJETExt.jl test/runtests.jl code_ratchet/*_baseline.toml
+          git add README.md src/CodeRatchet.jl src/complexity.jl src/init.jl ext/CodeRatchetJETExt.jl test/runtests.jl test/group_and_init.jl code_ratchet/*_baseline.toml
           git commit -m 'feat: make measurement provenance exact'
           git push origin HEAD:feat/reproducible-provenance

@@ -1,0 +1,238 @@
+name: Patch reproducible provenance
+
+on:
+  push:
+    branches: ['feat/reproducible-provenance']
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/reproducible-provenance
+      - name: Implement semantic provenance
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          core = Path('src/CodeRatchet.jl')
+          text = core.read_text()
+
+          old = '''provenance(::Metric, ::AbstractString) = Dict{String,Any}()
+
+"""
+    entry_failures(metric, root, paths, rows) -> Vector{String}
+'''
+          new = '''provenance(::Metric, ::AbstractString) = Dict{String,Any}()
+
+"""
+    metric_schema(metric) -> Int
+
+Version of the metric's measurement semantics. Increment it when the same
+configuration would produce numbers with a different meaning.
+"""
+metric_schema(::Metric) = 1
+
+"""
+    measurement_provenance(metric, root) -> Dict{String,Any}
+
+Complete semantic identity of one measurement. Unlike `commit`, every field in
+this map binds: a baseline is comparable only when the key set and values agree.
+"""
+function measurement_provenance(metric::Metric, root::AbstractString)
+  result = copy(provenance(metric, root))
+  result["schema"] = metric_schema(metric)
+  result["binding"] = collect(binding(metric))
+  result["direction"] = [string(direction(metric, key)) for key in binding(metric)]
+  return result
+end
+
+"""
+    entry_failures(metric, root, paths, rows) -> Vector{String}
+'''
+          if text.count(old) != 1:
+              raise SystemExit(f'core provenance insertion anchor count: {text.count(old)}')
+          text = text.replace(old, new)
+
+          old = '''  for (key, value) in sort(collect(provenance(metric, root)); by=first)
+    println(io, key, " = ", tomlvalue(value))
+  end
+  println(io, "binding = ", tomlvalue(collect(binding(metric))))
+'''
+          new = '''  for (key, value) in sort(collect(measurement_provenance(metric, root)); by=first)
+    println(io, key, " = ", tomlvalue(value))
+  end
+'''
+          if text.count(old) != 1:
+              raise SystemExit(f'render provenance anchor count: {text.count(old)}')
+          text = text.replace(old, new)
+
+          old = '''function provenance_failures(
+  metric::Metric, recorded::Dict{String,Any}, root::AbstractString
+)
+  isempty(recorded) && return String[]
+  bad = String[]
+  for (key, value) in sort(collect(provenance(metric, root)); by=first)
+    key == "commit" && continue
+    haskey(recorded, key) || continue
+    recorded[key] == value && continue
+    push!(
+      bad,
+      "provenance moved under the baseline: $key was $(repr(recorded[key])), " *
+      "now $(repr(value)). Refresh the baseline in the same commit that moved the tool.",
+    )
+  end
+  return bad
+end
+'''
+          new = '''function provenance_failures(
+  metric::Metric, recorded::Dict{String,Any}, root::AbstractString
+)
+  expected = measurement_provenance(metric, root)
+  comparable_keys(table) = Set(k for k in keys(table) if k != "commit")
+  expected_keys = comparable_keys(expected)
+  recorded_keys = comparable_keys(recorded)
+  bad = String[]
+
+  for key in sort!(collect(setdiff(expected_keys, recorded_keys)))
+    push!(
+      bad,
+      "provenance missing from the baseline: $key is now required as " *
+      "$(repr(expected[key])). Refresh the baseline in the same commit that moved the tool.",
+    )
+  end
+  for key in sort!(collect(setdiff(recorded_keys, expected_keys)))
+    push!(
+      bad,
+      "stale provenance in the baseline: $key = $(repr(recorded[key])) is no longer " *
+      "part of this metric. Refresh the baseline in the same commit that moved the tool.",
+    )
+  end
+  for key in sort!(collect(intersect(expected_keys, recorded_keys)))
+    recorded[key] == expected[key] && continue
+    push!(
+      bad,
+      "provenance moved under the baseline: $key was $(repr(recorded[key])), " *
+      "now $(repr(expected[key])). Refresh the baseline in the same commit that moved the tool.",
+    )
+  end
+  return bad
+end
+'''
+          if text.count(old) != 1:
+              raise SystemExit(f'provenance_failures anchor count: {text.count(old)}')
+          core.write_text(text.replace(old, new))
+
+          complexity = Path('src/complexity.jl')
+          text = complexity.read_text()
+          old = '''using CodeComplexity:
+  ArgumentCountComplexity, CognitiveComplexity, CyclomaticComplexity, measure_file
+'''
+          new = '''using CodeComplexity:
+  CodeComplexity, ArgumentCountComplexity, CognitiveComplexity, CyclomaticComplexity, measure_file
+'''
+          if text.count(old) != 1:
+              raise SystemExit(f'CodeComplexity import anchor count: {text.count(old)}')
+          text = text.replace(old, new)
+          old = '''    "tool" => "CodeComplexity",
+    # Changed when the count of definitions above threshold was added. An older
+'''
+          new = '''    "tool" => "CodeComplexity",
+    "version" => string(Base.pkgversion(CodeComplexity)),
+    # Changed when the count of definitions above threshold was added. An older
+'''
+          if text.count(old) != 1:
+              raise SystemExit(f'CodeComplexity provenance anchor count: {text.count(old)}')
+          complexity.write_text(text.replace(old, new))
+
+          jet = Path('ext/CodeRatchetJETExt.jl')
+          text = jet.read_text()
+          old = '''    "metric" => "jet",
+    "attribution" => "deepest_repository_frame",
+'''
+          new = '''    "metric" => "jet",
+    "tool" => "JET",
+    "version" => string(Base.pkgversion(JET)),
+    "attribution" => "deepest_repository_frame",
+'''
+          if text.count(old) != 1:
+              raise SystemExit(f'JET provenance anchor count: {text.count(old)}')
+          jet.write_text(text.replace(old, new))
+
+          tests = Path('test/runtests.jl')
+          text = tests.read_text()
+          anchor = '''  @testset "the ratchet" begin
+'''
+          addition = '''  @testset "semantic provenance is exact" begin
+    root = gitrepo(Dict("src/a.jl" => "f() = 1\n"); rulings=SRC_ONLY)
+    metric = Fake()
+    expected = CodeRatchet.measurement_provenance(metric, root)
+
+    @test expected["schema"] == 1
+    @test expected["binding"] == ["bind"]
+    @test expected["direction"] == ["down"]
+    @test isempty(CodeRatchet.provenance_failures(metric, copy(expected), root))
+
+    missing = copy(expected)
+    delete!(missing, "schema")
+    @test any(occursin("provenance missing"), CodeRatchet.provenance_failures(metric, missing, root))
+
+    stale = copy(expected)
+    stale["old_schema"] = 1
+    @test any(occursin("stale provenance"), CodeRatchet.provenance_failures(metric, stale, root))
+
+    moved = copy(expected)
+    moved["direction"] = ["up"]
+    @test any(occursin("provenance moved"), CodeRatchet.provenance_failures(metric, moved, root))
+
+    with_commit = copy(expected)
+    with_commit["commit"] = "an older source tree"
+    @test isempty(CodeRatchet.provenance_failures(metric, with_commit, root))
+
+    rendered = CodeRatchet.render_baseline(metric, Dict("src/a.jl" => fake(1, 2)), root)
+    @test occursin("schema = 1", rendered)
+    @test occursin("binding = [\\\"bind\\\"]", rendered)
+    @test occursin("direction = [\\\"down\\\"]", rendered)
+  end
+
+''' + anchor
+          if text.count(anchor) != 1:
+              raise SystemExit(f'test insertion anchor count: {text.count(anchor)}')
+          tests.write_text(text.replace(anchor, addition))
+          PY
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: '1.13'
+      - name: Format and test implementation
+        run: |
+          julia -e 'using Pkg; Pkg.add(name="JuliaFormatter", version="2")'
+          julia -e 'using JuliaFormatter; format("src/CodeRatchet.jl"); format("src/complexity.jl"); format("ext/CodeRatchetJETExt.jl"); format("test/runtests.jl")'
+          julia --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.test()'
+      - name: Re-render existing numeric baselines with the new semantic identity
+        run: |
+          julia -e 'using Pkg; Pkg.Apps.add(; url="https://github.com/aviatesk/JETLS.jl", rev="6893fcef26708d64360c048e039102c76ad032c0")'
+          export PATH="$HOME/.julia/bin:$PATH"
+          julia --project=code_ratchet -e '
+            using Pkg; Pkg.instantiate()
+            using CodeRatchet, JET
+            root = pwd(); dir = joinpath(root, "code_ratchet")
+            metrics = Any[
+              Complexity(), Style(root; dir), Docstrings(), Coverage(), Boxes(), Lsp(), CodeRatchet.jet_metric()
+            ]
+            for metric in metrics
+              rows, _ = CodeRatchet.read_baseline(metric, dir)
+              rows === nothing && continue
+              write(CodeRatchet.baseline_path(metric, dir), CodeRatchet.render_baseline(metric, rows, root))
+            end
+          '
+      - name: Commit implementation and baseline migration
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/CodeRatchet.jl src/complexity.jl ext/CodeRatchetJETExt.jl test/runtests.jl code_ratchet/*_baseline.toml
+          git commit -m 'feat: make measurement provenance exact'
+          git push origin HEAD:feat/reproducible-provenance

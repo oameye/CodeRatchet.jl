@@ -25,15 +25,14 @@ jobs:
           julia -e 'using Pkg; Pkg.add(name="JuliaFormatter", version="2")'
           julia -e 'using JuliaFormatter; format(".")'
 
-      - name: Remove validation scaffolding and commit
+      - name: Commit source and test changes
         run: |
-          rm -f \
-            .github/workflows/_apply-coldstart-extension.yml \
-            .github/workflows/_validate-coldstart-extension.yml \
-            scripts/apply_coldstart_extension.py
+          # Workflow files are landed separately through the authenticated
+          # GitHub connector; GITHUB_TOKEN may not modify workflow definitions.
+          git restore .github/workflows/coldstart.yml
           git diff --check
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
+          git add Project.toml README.md src/ ext/ test/coldstart_metric.jl
           git commit -m "perf: keep cold-start harness out of core precompile"
           git push

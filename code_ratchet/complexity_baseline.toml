@@ -4,10 +4,13 @@
 
 [provenance]
 aggregation = "max_and_count_over_threshold"
-commit = "9da4a1e"
-metric = "complexity"
-tool = "CodeComplexity"
 binding = ["cyc", "cog", "arg", "cyc_over", "cog_over", "arg_over"]
+commit = "e0ecbba"
+direction = ["down", "down", "down", "down", "down", "down"]
+metric = "complexity"
+schema = 1
+tool = "CodeComplexity"
+version = "0.2.0"
 
 [files."ext/CodeRatchetJETExt.jl"]
 cyc = 9

@@ -53,7 +53,31 @@ replace_once(
 )
 
 replace_once(
+    "src/init.jl",
+    '''function ratchet_project(identity)\n  io = IOBuffer()\n''',
+    '''function exact_git_revision(rev::AbstractString)\n  return occursin(r"^[0-9a-f]{40}([0-9a-f]{24})?$"i, rev)\nend\n\nfunction coderatchet_revision()\n  requested = get(ENV, "CODERATCHET_REV", "")\n  if !isempty(requested)\n    exact_git_revision(requested) || error(\n      "CODERATCHET_REV must be a full 40- or 64-hex git commit, not $(repr(requested)).",\n    )\n    return lowercase(requested)\n  end\n\n  source = Base.pathof(@__MODULE__)\n  if source !== nothing\n    root = dirname(dirname(source))\n    if ispath(joinpath(root, ".git"))\n      revision = try\n        strip(read(pipeline(Cmd(`git rev-parse HEAD`; dir=root); stderr=devnull), String))\n      catch\n        ""\n      end\n      exact_git_revision(revision) && return lowercase(revision)\n    end\n  end\n\n  project = Base.active_project()\n  if project !== nothing\n    manifest = joinpath(dirname(project), "Manifest.toml")\n    if isfile(manifest)\n      raw = TOML.parsefile(manifest)\n      deps = get(raw, "deps", Dict{String,Any}())\n      entries = get(deps, "CodeRatchet", Any[])\n      entries isa AbstractVector || (entries = Any[entries])\n      for entry in entries\n        entry isa AbstractDict || continue\n        revision = String(get(entry, "repo-rev", ""))\n        exact_git_revision(revision) && return lowercase(revision)\n      end\n    end\n  end\n\n  error(\n    "cannot derive an immutable CodeRatchet revision. Install CodeRatchet at an exact " *\n    "commit, develop it from a git checkout, or set CODERATCHET_REV to the full commit " *\n    "before running `coderatchet init`.",\n  )\nend\n\nfunction ratchet_project(identity)\n  io = IOBuffer()\n''',
+)
+
+replace_once(
+    "src/init.jl",
+    '''  else\n    println(\n      io,\n      "CodeRatchet = {url = \\"https://github.com/oameye/CodeRatchet.jl\\", rev = \\"main\\"}",\n    )\n    isempty(identity.name) || println(io, identity.name, " = {path = \\"..\\"}")\n  end\n''',
+    '''  else\n    revision = coderatchet_revision()\n    println(\n      io,\n      "CodeRatchet = {url = \\"https://github.com/oameye/CodeRatchet.jl\\", rev = ",\n      repr(revision),\n      "}",\n    )\n    isempty(identity.name) || println(io, identity.name, " = {path = \\"..\\"}")\n  end\n''',
+)
+
+replace_once(
     "test/runtests.jl",
     '''  @testset "the ratchet" begin\n''',
     '''  @testset "semantic provenance is exact" begin\n    root = gitrepo(Dict("src/a.jl" => "f() = 1\\n"); rulings=SRC_ONLY)\n    metric = Fake()\n    expected = CodeRatchet.measurement_provenance(metric, root)\n\n    @test expected["schema"] == 1\n    @test expected["binding"] == ["bind"]\n    @test expected["direction"] == ["down"]\n    @test isempty(CodeRatchet.provenance_failures(metric, copy(expected), root))\n\n    for (key, value, needle) in (\n      ("schema", 2, "provenance moved"),\n      ("binding", ["other"], "provenance moved"),\n      ("direction", ["up"], "provenance moved"),\n    )\n      changed = copy(expected)\n      changed[key] = value\n      @test any(\n        msg -> occursin(needle, msg),\n        CodeRatchet.provenance_failures(metric, changed, root),\n      )\n    end\n\n    missing = copy(expected)\n    delete!(missing, "schema")\n    @test any(\n      msg -> occursin("provenance missing", msg),\n      CodeRatchet.provenance_failures(metric, missing, root),\n    )\n\n    stale = copy(expected)\n    stale["old_schema"] = 1\n    @test any(\n      msg -> occursin("stale provenance", msg),\n      CodeRatchet.provenance_failures(metric, stale, root),\n    )\n\n    with_commit = copy(expected)\n    with_commit["commit"] = "an older source tree"\n    @test isempty(CodeRatchet.provenance_failures(metric, with_commit, root))\n\n    rendered = CodeRatchet.render_baseline(metric, Dict("src/a.jl" => fake(1, 2)), root)\n    @test occursin("schema = 1", rendered)\n    @test occursin("binding = [\\\"bind\\\"]", rendered)\n    @test occursin("direction = [\\\"down\\\"]", rendered)\n  end\n\n  @testset "provenance migration is deliberate" begin\n    root = gitrepo(Dict("src/a.jl" => "f() = 1\\n"); rulings=SRC_ONLY)\n    metric = Complexity()\n    refresh(metric, root)\n    path = CodeRatchet.baseline_path(metric, joinpath(root, "code_ratchet"))\n    text = read(path, String)\n    write(path, replace(text, "schema = 1" => "schema = 999"))\n\n    @test_throws ErrorException refresh(metric, root)\n    refresh(metric, root; accept_change=true)\n    @test isempty(CodeRatchet.provenance_failures(\n      metric, last(read_baseline(metric, joinpath(root, "code_ratchet"))), root\n    ))\n  end\n\n  @testset "backend versions are semantic provenance" begin\n    root = gitrepo(Dict("src/a.jl" => "f() = 1\\n"); rulings=SRC_ONLY)\n    p = CodeRatchet.provenance(Complexity(), root)\n    @test p["tool"] == "CodeComplexity"\n    @test !isempty(p["version"])\n  end\n\n  @testset "the ratchet" begin\n''',
+)
+
+replace_once(
+    "test/group_and_init.jl",
+    '''  @testset "the generated Project.toml parses" begin\n''',
+    '''  @testset "consumer scaffolding pins the exact running revision" begin\n    root = demo()\n    initialise(root)\n    raw = TOML.parsefile(joinpath(ratchet_dir(root), "Project.toml"))\n    revision = raw["sources"]["CodeRatchet"]["rev"]\n    @test CodeRatchet.exact_git_revision(revision)\n    @test revision != "main"\n  end\n\n  @testset "an explicit moving revision is refused" begin\n    withenv("CODERATCHET_REV" => "main") do\n      @test_throws ErrorException CodeRatchet.coderatchet_revision()\n    end\n  end\n\n  @testset "the generated Project.toml parses" begin\n''',
+)
+
+replace_once(
+    "README.md",
+    '''    uses: oameye/CodeRatchet.jl/.github/workflows/ratchet.yml@main\n''',
+    '''    # Use the same immutable commit recorded in code_ratchet/Project.toml.\n    uses: oameye/CodeRatchet.jl/.github/workflows/ratchet.yml@<CodeRatchet-commit>\n''',
 )

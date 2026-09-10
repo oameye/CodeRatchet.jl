@@ -17,10 +17,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 1.12 is the floor, not a preference. Boxes needs Base.visit, the
-        # `public` keyword the Docstrings metric reads is 1.11, and 1.12 is
-        # where lowering stopped boxing a capture reassigned before capture.
-        julia: ['1.12']
+        # CodeRatchet is a tooling environment of its own. 1.13 is the
+        # reference runtime so compiler-facing gates can use its Pkg and
+        # introspection facilities without constraining the Julia versions
+        # supported by the package under measurement.
+        julia: ['1.13']
         os: [ubuntu-latest]
     steps:
       - uses: actions/checkout@v4
@@ -48,7 +49,7 @@ jobs:
     needs: test
     uses: ./.github/workflows/ratchet.yml
     with:
-      julia-version: '1.12'
+      julia-version: '1.13'
       coverage: true
       install-jetls: true
       # The revision the lsp baseline was taken under. `release` moves, and an

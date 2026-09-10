@@ -3,9 +3,10 @@ Paired cold-start measurements for one package revision against another.
 
 This is deliberately not a [`Metric`](@ref). A `Metric` is a persistent,
 per-file integer ratchet; wall-clock latency is noisy and only meaningful when
-base and head are measured together on the same runner. `ColdStart` therefore
-owns a second comparison protocol while sharing CodeRatchet's rule that a gate
-must say exactly what moved and how to reproduce it.
+base and head are measured together on the same runner. The cold-start
+subsystem therefore owns a second comparison protocol while sharing
+CodeRatchet's rule that a gate must say exactly what moved and how to reproduce
+it.
 """
 
 struct ColdStartConfig
@@ -133,11 +134,14 @@ end
 
 function _build_record(builds, variant::AbstractString, build::Int)
   matches = [b for b in builds if b.variant == variant && b.build == build]
-  length(matches) == 1 || error("cold-start result has $(length(matches)) $variant build-$build rows")
+  length(matches) == 1 ||
+    error("cold-start result has $(length(matches)) $variant build-$build rows")
   return only(matches)
 end
 
-function _scenario_median(samples, variant::AbstractString, build::Int, scenario::AbstractString, key)
+function _scenario_median(
+  samples, variant::AbstractString, build::Int, scenario::AbstractString, key
+)
   rows = [
     s for s in samples
     if s.variant == variant && s.build == build && s.scenario == scenario
@@ -242,11 +246,12 @@ end
 
 function Base.show(io::IO, report::ColdStartReport)
   println(io, "CodeRatchet coldstart: ", ok(report) ? "PASS" : "FAIL")
+  width = maximum(length(v.subject) for v in report.verdicts)
   for verdict in report.verdicts
     println(
       io,
       "  ",
-      rpad(verdict.subject, maximum(length(v.subject) for v in report.verdicts)),
+      rpad(verdict.subject, width),
       "  ",
       _format_ns(verdict.baseline_ns),
       " -> ",
@@ -276,6 +281,11 @@ function _coldstart_env(
 )
   env = Dict{String,String}(String(k) => String(v) for (k, v) in ENV)
   env["JULIA_DEPOT_PATH"] = String(depot)
+  # Pkg.test and some CI harnesses deliberately narrow JULIA_LOAD_PATH. A
+  # cold-start child must not inherit that process-local choice or even stdlibs
+  # such as Pkg can disappear. The measured package itself is supplied by an
+  # explicit --project below.
+  env["JULIA_LOAD_PATH"] = "@:@stdlib"
   env["JULIA_NUM_THREADS"] = "1"
   env["OPENBLAS_NUM_THREADS"] = "1"
   env["JULIA_NUM_PRECOMPILE_TASKS"] = string(precompile_tasks)
@@ -397,7 +407,9 @@ function _driver_output(
   config::ColdStartConfig;
   scenario::AbstractString="",
 )
-  args = String[_driver_path(), String(package), String(scenarios)]
+  args = String[
+    "--project=$(String(environment))", _driver_path(), String(package), String(scenarios)
+  ]
   isempty(scenario) || push!(args, String(scenario))
   cmd = _julia_command(args; dir=checkout)
   return read(
@@ -498,7 +510,8 @@ end
 
 function _full_commit(root::AbstractString)
   try
-    return strip(read(Cmd(`git rev-parse HEAD`; dir=root), String))
+    command = pipeline(Cmd(`git rev-parse HEAD`; dir=root); stderr=devnull)
+    return strip(read(command, String))
   catch
     return "unknown"
   end
@@ -614,11 +627,9 @@ function coldstart_compare(
     isabspath(config.scenarios) ? config.scenarios : joinpath(head, config.scenarios)
   isfile(scenario_file) || error("cold-start scenario registry not found: $scenario_file")
 
-  builds = ColdStartBuild[]
-  samples = ColdStartSample[]
-  scenarios = String[]
-
-  mktempdir() do temporary
+  scenarios, builds, samples = mktempdir() do temporary
+    builds = ColdStartBuild[]
+    samples = ColdStartSample[]
     seed_depot = joinpath(temporary, "seed-depot")
     base_environment = joinpath(temporary, "base-environment")
     head_environment = joinpath(temporary, "head-environment")
@@ -698,6 +709,7 @@ function coldstart_compare(
         end
       end
     end
+    return scenarios, builds, samples
   end
 
   verdicts = _coldstart_verdicts(config, scenarios, builds, samples)

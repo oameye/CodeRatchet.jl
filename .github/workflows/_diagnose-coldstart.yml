@@ -1,0 +1,59 @@
+name: Diagnose cold-start ratchet
+
+on:
+  push:
+    branches:
+      - feat/coldstart-julia-1.13
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: '1.13'
+      - name: Install JETLS
+        run: |
+          julia -e 'using Pkg; Pkg.Apps.add(; url="https://github.com/aviatesk/JETLS.jl", rev="6893fcef26708d64360c048e039102c76ad032c0")'
+          echo "$HOME/.julia/bin" >> "$GITHUB_PATH"
+      - name: Build coverage trace
+        run: |
+          julia --project=. -e 'using Pkg; Pkg.test(coverage=true)'
+          julia -e '
+            using Pkg; Pkg.activate(temp=true); Pkg.add("CoverageTools")
+            using CoverageTools
+            fcs = FileCoverage[]
+            for folder in filter(isdir, ["src", "ext"])
+              append!(fcs, process_folder(folder))
+            end
+            LCOV.writefile("lcov.info", fcs)'
+      - name: Instantiate ratchet tooling
+        run: julia --project=code_ratchet -e 'using Pkg; Pkg.instantiate()'
+      - name: Print exact cold-start debt
+        env:
+          COVERAGE_LCOV: ${{ github.workspace }}/lcov.info
+        run: |
+          echo '=== COMPLEXITY ==='
+          julia --project=code_ratchet -e 'using CodeRatchet; exit(CodeRatchet.main(["complexity", "candidates"]))' || true
+          echo '=== COVERAGE ==='
+          julia --project=code_ratchet -e 'using CodeRatchet; exit(CodeRatchet.main(["coverage", "terminal"]))' || true
+          echo '=== LSP ==='
+          julia --project=code_ratchet -e 'using CodeRatchet; exit(CodeRatchet.main(["lsp", "report"]))' || true
+          echo '=== JET ==='
+          julia --project=code_ratchet -e '
+            using CodeRatchet, JET
+            ext = Base.get_extension(CodeRatchet, :CodeRatchetJETExt)
+            root = pwd(); dir = joinpath(root, "code_ratchet")
+            rulings = CodeRatchet.read_rulings(dir)
+            settings = ext.jet_settings(rulings)
+            for name in settings.load; Base.require(Main, Symbol(name)); end
+            mod = Base.require(Main, Symbol(settings.package))
+            targets = Tuple(Base.require(Main, Symbol(name)) for name in settings.targets)
+            result = JET.report_package(mod; target_modules=targets)
+            for report in JET.get_reports(result)
+              rel = ext.attribute(report, root)
+              isempty(rel) && continue
+              ext.dismissed(report, rulings) && continue
+              println(rel, ": ", sprint(show, report))
+            end'

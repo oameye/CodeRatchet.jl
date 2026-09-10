@@ -8,7 +8,7 @@ reach today, which an absolute gate never is. "JET reports zero" cannot be
 switched on for a package with 200 reports. "No file gains a report" can be
 switched on this afternoon.
 
-Six metrics today, one comparison rule:
+Seven persistent metrics today, one comparison rule:
 
 | Metric | Binds on | Context it also records | Cost |
 | --- | --- | --- | --- |
@@ -157,13 +157,25 @@ target-package cache builds and fresh Julia processes for each scenario sample.
 Only package precompile time and total time-to-first-execution gate; import,
 compilation/recompilation, warm latency and cache bytes remain diagnostic context.
 
+The **complete comparison protocol is frozen to the base revision**. If base
+already has a `[coldstart]` block, its scenario path, build/sample counts,
+materiality thresholds and precompile worker count judge both revisions. A head
+configuration is used only while bootstrapping a repository that had no
+cold-start configuration before the PR. The same rule applies to the relative
+scenario registry. Base and head must also discover the same ordered scenario
+names; otherwise there is no paired experiment to compare and the job fails.
+
 Put representative zero-argument workloads in
 `benchmark/precompile/scenarios.jl` as an ordered named tuple named
-`PRECOMPILE_BENCHMARKS`. For an ordinary PR, CodeRatchet deliberately uses the
-**base revision's** scenario file for both revisions, so the candidate cannot
-silently redefine the benchmark that judges it. The head scenario file is used
-only to bootstrap a repository whose base has no scenario registry yet. The
-result artifact records `scenario_source`, `scenario_path` and `scenario_hash`.
+`PRECOMPILE_BENCHMARKS`:
+
+```julia
+exercise_api() = check(MyPackage.answer() == 42, "unexpected answer")
+
+const PRECOMPILE_BENCHMARKS = (
+    exercise_api = exercise_api,
+)
+```
 
 ```toml
 [coldstart]
@@ -175,9 +187,35 @@ relative = 0.05
 precompile_tasks = 1
 ```
 
-The reusable `coldstart.yml` workflow performs the paired comparison. Timing is
-intentionally not written into the normal CodeRatchet baseline: runner noise is
-handled by same-run base/head comparison and explicit materiality floors instead.
+Each measured build explicitly precompiles the target package. Scenario
+processes then run with `--compiled-modules=existing --pkgimages=existing`, so
+that phase may consume the package caches just built but cannot silently create
+new ones. Runtime JIT work still contributes to first-use latency. The result
+artifact includes the exact base/head consumer Project and Manifest files,
+SHA-256 workload/config/environment identities, Julia runtime/system-image
+identity and both commit SHAs.
+
+Use the paired workflow separately from the persistent ratchet job and pin the
+CodeRatchet revision:
+
+```yaml
+jobs:
+  coldstart:
+    uses: oameye/CodeRatchet.jl/.github/workflows/coldstart.yml@<CODE_RATCHET_SHA>
+```
+
+The same experiment can be run locally against two checkouts:
+
+```sh
+julia --project=code_ratchet \
+  -e 'using CodeRatchet; exit(CodeRatchet.coldstart_main())' \
+  compare --base /path/to/base --head /path/to/head \
+  --output coldstart-results
+```
+
+Timing is intentionally not written into the normal CodeRatchet baseline:
+runner noise is handled by same-run base/head comparison, alternating build
+order, repeated fresh processes and explicit materiality floors instead.
 
 ### By hand
 

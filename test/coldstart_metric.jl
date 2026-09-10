@@ -54,8 +54,41 @@ end
 
       write(joinpath(dir, "rulings.toml"), "[coldstart]\nbuilds = 0\n")
       @test_throws ErrorException CodeRatchet.coldstart_config(root; dir)
+      write(joinpath(dir, "rulings.toml"), "[coldstart]\nbuilds = \"many\"\n")
+      @test_throws ErrorException CodeRatchet.coldstart_config(root; dir)
+      write(joinpath(dir, "rulings.toml"), "[coldstart]\nabsolute_ms = \"slow\"\n")
+      @test_throws ErrorException CodeRatchet.coldstart_config(root; dir)
+      write(joinpath(dir, "rulings.toml"), "[coldstart]\nabsolute_ms = -1\n")
+      @test_throws ErrorException CodeRatchet.coldstart_config(root; dir)
+      write(joinpath(dir, "rulings.toml"), "[coldstart]\nrelative = \"large\"\n")
+      @test_throws ErrorException CodeRatchet.coldstart_config(root; dir)
       write(joinpath(dir, "rulings.toml"), "[coldstart]\nrelative = 1.0\n")
       @test_throws ErrorException CodeRatchet.coldstart_config(root; dir)
+    end
+  end
+
+  @testset "configuration is frozen to base after bootstrap" begin
+    mktempdir() do root
+      base = joinpath(root, "base")
+      head = joinpath(root, "head")
+      base_dir = joinpath(base, "code_ratchet")
+      head_dir = joinpath(head, "code_ratchet")
+      mkpath(base_dir)
+      mkpath(head_dir)
+      write(joinpath(base_dir, "rulings.toml"), "[scope]\nmeasure = [\"src/\"]\n")
+      write(joinpath(head_dir, "rulings.toml"), "[coldstart]\nbuilds = 3\nsamples = 1\n")
+      selection = CodeRatchet.coldstart_config_selection(base, head, "code_ratchet")
+      @test selection.source == "head-bootstrap"
+      @test selection.config.builds == 3
+
+      write(joinpath(base_dir, "rulings.toml"), "[coldstart]\nbuilds = 2\nsamples = 1\n")
+      selection = CodeRatchet.coldstart_config_selection(base, head, "code_ratchet")
+      @test selection.source == "base"
+      @test selection.config.builds == 2
+
+      selection = CodeRatchet.coldstart_config_selection(base, head, head_dir)
+      @test selection.source == "absolute"
+      @test selection.config.builds == 3
     end
   end
 
@@ -84,7 +117,26 @@ end
       scenario = CodeRatchet.coldstart_scenario_file(base, head, config)
       @test scenario.source == "base"
       @test scenario.file == joinpath(base, "scenarios.jl")
+
+      absolute = joinpath(root, "absolute-scenarios.jl")
+      write(absolute, "absolute\n")
+      absolute_config = CodeRatchet.ColdStartConfig(absolute, 1, 1, 0, 0.0, 1)
+      scenario = CodeRatchet.coldstart_scenario_file(base, head, absolute_config)
+      @test scenario.source == "absolute"
+      @test scenario.file == absolute
+      missing_config = CodeRatchet.ColdStartConfig(
+        joinpath(root, "missing.jl"), 1, 1, 0, 0.0, 1
+      )
+      @test_throws ErrorException CodeRatchet.coldstart_scenario_file(
+        base, head, missing_config
+      )
     end
+  end
+
+  @testset "base and head must expose the same ordered workload registry" begin
+    @test CodeRatchet.matching_scenarios(["a", "b"], ["a", "b"]) == ["a", "b"]
+    @test_throws ErrorException CodeRatchet.matching_scenarios(["a"], ["b"])
+    @test_throws ErrorException CodeRatchet.matching_scenarios(["a", "b"], ["b", "a"])
   end
 
   @testset "median and materiality are exact" begin
@@ -164,6 +216,13 @@ end
     @test occursin("--history-file=no", rendered)
     @test !occursin("--code-coverage", rendered)
     @test !occursin("--check-bounds", rendered)
+    cached = CodeRatchet.julia_command(["--version"]; dir=pwd(), existing_caches=true)
+    cached_rendered = string(cached)
+    @test occursin("--compiled-modules=existing", cached_rendered)
+    @test occursin("--pkgimages=existing", cached_rendered)
+    @test occursin(
+      "Pkg.precompile(ARGS[2]; strict=true", CodeRatchet.PRECOMPILE_ENVIRONMENT
+    )
   end
 
   @testset "cache helpers measure and remove only the target package" begin
@@ -199,7 +258,13 @@ end
 ",
       )
       CodeRatchet.write_coldstart_results(
-        report, output, pwd(), pwd(); scenario_file, scenario_source="base"
+        report,
+        output,
+        pwd(),
+        pwd();
+        scenario_file,
+        scenario_source="base",
+        config_source="base",
       )
       @test isfile(joinpath(output, "builds.tsv"))
       @test isfile(joinpath(output, "samples.tsv"))
@@ -208,10 +273,15 @@ end
       @test occursin("julia=$(VERSION)", metadata)
       @test occursin("cpu_target=", metadata)
       @test occursin("runner_image=", metadata)
+      @test occursin("sysimage_target=", metadata)
+      @test occursin("config_source=base", metadata)
+      @test occursin("config_hash=", metadata)
       @test occursin("scenario_source=base", metadata)
       @test occursin("scenario_path=scenarios.jl", metadata)
-      @test occursin("scenario_hash=", metadata)
-      @test !occursin("scenario_hash=unknown", metadata)
+      hash_line = only(
+        filter(line -> startswith(line, "scenario_hash="), split(metadata, '\n'))
+      )
+      @test length(split(hash_line, "="; limit=2)[2]) == 64
     end
   end
 
@@ -295,7 +365,7 @@ end
         "--head",
         head,
         "--ratchet-dir",
-        ratchet,
+        "code_ratchet",
         "--output",
         output,
       ])
@@ -303,12 +373,18 @@ end
       @test isfile(joinpath(output, "builds.tsv"))
       @test isfile(joinpath(output, "samples.tsv"))
       @test isfile(joinpath(output, "summary.md"))
+      @test isfile(joinpath(output, "base-consumer-Project.toml"))
+      @test isfile(joinpath(output, "base-consumer-Manifest.toml"))
+      @test isfile(joinpath(output, "head-consumer-Project.toml"))
+      @test isfile(joinpath(output, "head-consumer-Manifest.toml"))
       @test countlines(joinpath(output, "builds.tsv")) == 3
       @test countlines(joinpath(output, "samples.tsv")) == 3
       @test occursin("| smoke |", read(joinpath(output, "summary.md"), String))
       metadata = read(joinpath(output, "metadata.txt"), String)
+      @test occursin("config_source=head-bootstrap", metadata)
       @test occursin("scenario_source=head-bootstrap", metadata)
-      @test !occursin("scenario_hash=unknown", metadata)
+      @test occursin("base_consumer_manifest_sha256=", metadata)
+      @test occursin("head_consumer_manifest_sha256=", metadata)
     end
   end
 
@@ -318,5 +394,7 @@ end
     @test CodeRatchet.coldstart_main(["compare"]) == 2
     @test CodeRatchet.coldstart_main(["compare", "--base"]) == 2
     @test CodeRatchet.coldstart_main(["compare", "--wat", "value"]) == 2
+    missing = joinpath(pwd(), "definitely-missing-coldstart-checkout")
+    @test CodeRatchet.coldstart_main(["compare", "--base", missing]) == 1
   end
 end

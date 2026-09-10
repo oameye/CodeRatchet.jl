@@ -567,11 +567,14 @@ function write_coldstart_results(
   end
 
   write(joinpath(output_dir, "summary.md"), coldstart_markdown(report))
-  scenario_file =
-    isabspath(report.config.scenarios) ? report.config.scenarios : joinpath(head, report.config.scenarios)
+  scenario_file = if isabspath(report.config.scenarios)
+  report.config.scenarios
+else
+  joinpath(head, report.config.scenarios)
+end
   open(joinpath(output_dir, "metadata.txt"), "w") do io
     println(io, "julia=", VERSION)
-    println(io, "sysimage_target=", Sys.sysimage_target())
+    println(io, "cpu_target=", unsafe_string(Base.JLOptions().cpu_target))
     println(io, "machine=", Sys.MACHINE)
     println(io, "runner_image=", get(ENV, "ImageVersion", "unknown"))
     println(io, "base_commit=", full_commit(base))

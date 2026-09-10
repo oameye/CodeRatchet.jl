@@ -170,7 +170,7 @@ end
       @test isfile(joinpath(output, "summary.md"))
       metadata = read(joinpath(output, "metadata.txt"), String)
       @test occursin("julia=$(VERSION)", metadata)
-      @test occursin("sysimage_target=", metadata)
+      @test occursin("cpu_target=", metadata)
       @test occursin("runner_image=", metadata)
       @test occursin("scenario_hash=", metadata)
     end

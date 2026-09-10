@@ -4,10 +4,14 @@
 
 [provenance]
 attribution = "top_level_definition_ranges"
-commit = "3767ba3"
+commit = "a539df0"
 metric = "coverage"
 source = "lcov"
 binding = ["misses"]
+
+[files."ext/CodeRatchetColdStartExt.jl"]
+lines = 0
+misses = 0
 
 [files."ext/CodeRatchetJETExt.jl"]
 lines = 56

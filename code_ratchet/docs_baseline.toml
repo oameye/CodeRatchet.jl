@@ -3,10 +3,14 @@
 # judgements live in rulings.toml beside it.
 
 [provenance]
-commit = "3767ba3"
+commit = "a539df0"
 metric = "docs"
 public = "export_public_and_at_public"
 binding = ["undocumented"]
+
+[files."ext/CodeRatchetColdStartExt.jl"]
+undocumented = 0
+public = 0
 
 [files."ext/CodeRatchetJETExt.jl"]
 undocumented = 0
@@ -14,7 +18,7 @@ public = 0
 
 [files."src/CodeRatchet.jl"]
 undocumented = 0
-public = 2
+public = 4
 
 [files."src/all.jl"]
 undocumented = 0

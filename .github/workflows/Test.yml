@@ -79,4 +79,5 @@ jobs:
       - run: julia -e 'using Pkg; Pkg.add(name="JuliaFormatter", version="2")'
       - name: Check formatting
         run: |
-          julia -e 'using JuliaFormatter; exit(format(".", overwrite=false) ? 0 : 1)'
+          julia -e 'using JuliaFormatter; format(".")'
+          git diff --exit-code

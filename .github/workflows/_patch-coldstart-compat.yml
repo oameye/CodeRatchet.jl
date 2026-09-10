@@ -1,0 +1,57 @@
+name: Patch cold-start compatibility
+
+on:
+  push:
+    branches: ['feat/coldstart-julia-1.13']
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/coldstart-julia-1.13
+      - name: Apply exact compatibility and formatting fixes
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          source = Path('src/coldstart.jl')
+          text = source.read_text()
+          old = '''  scenario_file =
+            isabspath(report.config.scenarios) ? report.config.scenarios : joinpath(head, report.config.scenarios)
+          '''
+          new = '''  scenario_file = if isabspath(report.config.scenarios)
+            report.config.scenarios
+          else
+            joinpath(head, report.config.scenarios)
+          end
+          '''
+          if text.count(old) != 1:
+              raise SystemExit(f'expected one scenario formatting target, found {text.count(old)}')
+          text = text.replace(old, new)
+          old = '    println(io, "sysimage_target=", Sys.sysimage_target())\n'
+          new = '    println(io, "cpu_target=", unsafe_string(Base.JLOptions().cpu_target))\n'
+          if text.count(old) != 1:
+              raise SystemExit(f'expected one sysimage target line, found {text.count(old)}')
+          source.write_text(text.replace(old, new))
+
+          test = Path('test/coldstart_metric.jl')
+          text = test.read_text()
+          old = '@test occursin("sysimage_target=", metadata)'
+          new = '@test occursin("cpu_target=", metadata)'
+          if text.count(old) != 1:
+              raise SystemExit(f'expected one provenance assertion, found {text.count(old)}')
+          test.write_text(text.replace(old, new))
+          PY
+      - name: Commit cleanup and remove one-shot workflow
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm .github/workflows/_patch-coldstart-compat.yml
+          git add src/coldstart.jl test/coldstart_metric.jl
+          git commit -m 'fix: keep cold-start provenance compatible with Julia 1.12'
+          git push origin HEAD:feat/coldstart-julia-1.13

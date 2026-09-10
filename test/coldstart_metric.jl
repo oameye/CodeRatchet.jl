@@ -60,15 +60,15 @@ end
   end
 
   @testset "median and materiality are exact" begin
-    @test CodeRatchet._median_int([9, 1, 5]) == 5
-    @test CodeRatchet._median_int([1, 3, 7, 9]) == 5
-    @test_throws ErrorException CodeRatchet._median_int(Int[])
+    @test CodeRatchet.median_int([9, 1, 5]) == 5
+    @test CodeRatchet.median_int([1, 3, 7, 9]) == 5
+    @test_throws ErrorException CodeRatchet.median_int(Int[])
 
     config = CodeRatchet.ColdStartConfig("scenarios.jl", 2, 3, 50_000_000, 0.05, 1)
-    @test CodeRatchet._material_threshold(config, 200_000_000) == 50_000_000
-    @test CodeRatchet._material_threshold(config, 2_000_000_000) == 100_000_000
-    @test CodeRatchet._material_regression(config, 1_000_000_000, 1_050_000_000)
-    @test !CodeRatchet._material_regression(config, 1_000_000_000, 1_049_999_999)
+    @test CodeRatchet.material_threshold(config, 200_000_000) == 50_000_000
+    @test CodeRatchet.material_threshold(config, 2_000_000_000) == 100_000_000
+    @test CodeRatchet.material_regression(config, 1_000_000_000, 1_050_000_000)
+    @test !CodeRatchet.material_regression(config, 1_000_000_000, 1_049_999_999)
   end
 
   @testset "a noisy signal fails only when every independent build regresses" begin
@@ -85,7 +85,7 @@ end
       push!(samples, sample("head", build, sample_id, "solve", 600_000_000))
     end
 
-    verdicts = CodeRatchet._coldstart_verdicts(config, ["solve"], builds, samples)
+    verdicts = CodeRatchet.coldstart_verdicts(config, ["solve"], builds, samples)
     precompile, solve = verdicts
     @test precompile.regressed_builds == 1
     @test !precompile.failed
@@ -111,21 +111,22 @@ end
       sample("base", 1, 1, "solve", 500_000_000; compile_ns=1_000_000),
       sample("head", 1, 1, "solve", 500_000_000; compile_ns=400_000_000),
     ]
-    verdicts = CodeRatchet._coldstart_verdicts(config, ["solve"], builds, samples)
+    verdicts = CodeRatchet.coldstart_verdicts(config, ["solve"], builds, samples)
     report = CodeRatchet.ColdStartReport(config, ["solve"], builds, samples, verdicts)
     @test CodeRatchet.ok(report)
-    @test all(!v.failed for v in verdicts)
+    @test all(!verdict.failed for verdict in verdicts)
   end
 
   @testset "driver rows parse into integer nanosecond observations" begin
     output = "noise\nRESULT\tsolve\t10\t20\t5\t1\t30\t2\t0\t0\n"
-    parsed = CodeRatchet._parse_sample(output, "head", 2, 3, "solve")
+    target = CodeRatchet.ColdStartTarget("head", pwd(), pwd())
+    parsed = CodeRatchet.parse_sample(output, target, 2, 3, "solve")
     @test parsed.variant == "head"
     @test parsed.build == 2
     @test parsed.sample == 3
     @test parsed.total_ns == 30
     @test parsed.recompile_ns == 1
-    @test_throws ErrorException CodeRatchet._parse_sample(output, "head", 2, 3, "other")
+    @test_throws ErrorException CodeRatchet.parse_sample(output, target, 2, 3, "other")
   end
 
   @testset "cache helpers measure and remove only the target package" begin
@@ -136,9 +137,9 @@ end
       mkpath(other)
       write(joinpath(target, "a.ji"), "12345")
       write(joinpath(other, "b.ji"), "123456789")
-      @test CodeRatchet._package_cache_bytes(depot, "Tiny") == 5
-      CodeRatchet._remove_package_cache(depot, "Tiny")
-      @test CodeRatchet._package_cache_bytes(depot, "Tiny") == 0
+      @test CodeRatchet.package_cache_bytes(depot, "Tiny") == 5
+      CodeRatchet.remove_package_cache(depot, "Tiny")
+      @test CodeRatchet.package_cache_bytes(depot, "Tiny") == 0
       @test isfile(joinpath(other, "b.ji"))
     end
   end
@@ -150,7 +151,7 @@ end
       CodeRatchet.ColdStartBuild("head", 1, 90, 11),
     ]
     samples = [sample("base", 1, 1, "solve", 100), sample("head", 1, 1, "solve", 90)]
-    verdicts = CodeRatchet._coldstart_verdicts(config, ["solve"], builds, samples)
+    verdicts = CodeRatchet.coldstart_verdicts(config, ["solve"], builds, samples)
     report = CodeRatchet.ColdStartReport(config, ["solve"], builds, samples, verdicts)
     mktempdir() do output
       CodeRatchet.write_coldstart_results(report, output, pwd(), pwd())
@@ -163,7 +164,31 @@ end
     end
   end
 
-  @testset "the full experiment works on a dependency-free local package" begin
+  @testset "CLI option parsing is complete and rejects malformed input" begin
+    args = [
+      "compare",
+      "--base",
+      "/base",
+      "--head",
+      "/head",
+      "--ratchet-dir",
+      "/ratchet",
+      "--output",
+      "/output",
+    ]
+    options = CodeRatchet.parse_coldstart_options(args)
+    @test options.base == "/base"
+    @test options.head == "/head"
+    @test options.ratchet_dir == "/ratchet"
+    @test options.output == "/output"
+    @test_throws ArgumentError CodeRatchet.parse_coldstart_options(["compare"])
+    @test_throws ArgumentError CodeRatchet.parse_coldstart_options(["compare", "--base"])
+    @test_throws ArgumentError CodeRatchet.parse_coldstart_options([
+      "compare", "--wat", "value", "--base", "/base"
+    ])
+  end
+
+  @testset "the full CLI experiment works on a dependency-free local package" begin
     mktempdir() do root
       base = joinpath(root, "base")
       head = joinpath(root, "head")
@@ -185,6 +210,7 @@ end
 
       ratchet = joinpath(head, "code_ratchet")
       scenarios = joinpath(head, "benchmark", "precompile")
+      output = joinpath(root, "results")
       mkpath(ratchet)
       mkpath(scenarios)
       write(
@@ -211,12 +237,24 @@ end
         """,
       )
 
-      report = CodeRatchet.coldstart_compare(base, head)
-      @test CodeRatchet.ok(report)
-      @test report.scenarios == ["smoke"]
-      @test length(report.builds) == 2
-      @test length(report.samples) == 2
-      @test all(row.cache_bytes > 0 for row in report.builds)
+      exitcode = CodeRatchet.coldstart_main([
+        "compare",
+        "--base",
+        base,
+        "--head",
+        head,
+        "--ratchet-dir",
+        ratchet,
+        "--output",
+        output,
+      ])
+      @test exitcode == 0
+      @test isfile(joinpath(output, "builds.tsv"))
+      @test isfile(joinpath(output, "samples.tsv"))
+      @test isfile(joinpath(output, "summary.md"))
+      @test countlines(joinpath(output, "builds.tsv")) == 3
+      @test countlines(joinpath(output, "samples.tsv")) == 3
+      @test occursin("| smoke |", read(joinpath(output, "summary.md"), String))
     end
   end
 
@@ -224,6 +262,7 @@ end
     @test CodeRatchet.coldstart_main(String[]) == 2
     @test CodeRatchet.coldstart_main(["nope"]) == 2
     @test CodeRatchet.coldstart_main(["compare"]) == 2
-    @test CodeRatchet.coldstart_main(["compare", "--wat"]) == 2
+    @test CodeRatchet.coldstart_main(["compare", "--base"]) == 2
+    @test CodeRatchet.coldstart_main(["compare", "--wat", "value"]) == 2
   end
 end

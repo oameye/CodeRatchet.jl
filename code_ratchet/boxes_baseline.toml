@@ -4,7 +4,7 @@
 
 [provenance]
 attribution = "method_definition_file"
-commit = "90cc975"
+commit = "3767ba3"
 julia = "1.13"
 metric = "boxes"
 package = "CodeRatchet"
@@ -23,6 +23,12 @@ boxes = 0
 boxes = 0
 
 [files."src/cli.jl"]
+boxes = 0
+
+[files."src/coldstart.jl"]
+boxes = 0
+
+[files."src/coldstart_cli.jl"]
 boxes = 0
 
 [files."src/complexity.jl"]

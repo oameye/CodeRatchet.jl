@@ -4,7 +4,7 @@
 
 [provenance]
 attribution = "deepest_repository_frame"
-commit = "9da4a1e"
+commit = "3767ba3"
 load_set = ["JET"]
 metric = "jet"
 package = "CodeRatchet"
@@ -27,6 +27,14 @@ raw = 0
 reviewed = 0
 
 [files."src/cli.jl"]
+raw = 0
+reviewed = 0
+
+[files."src/coldstart.jl"]
+raw = 0
+reviewed = 0
+
+[files."src/coldstart_cli.jl"]
 raw = 0
 reviewed = 0
 

@@ -3,7 +3,7 @@
 # judgements live in rulings.toml beside it.
 
 [provenance]
-commit = "9da4a1e"
+commit = "3767ba3"
 metric = "docs"
 public = "export_public_and_at_public"
 binding = ["undocumented"]
@@ -27,6 +27,14 @@ public = 1
 [files."src/cli.jl"]
 undocumented = 0
 public = 0
+
+[files."src/coldstart.jl"]
+undocumented = 0
+public = 1
+
+[files."src/coldstart_cli.jl"]
+undocumented = 0
+public = 1
 
 [files."src/complexity.jl"]
 undocumented = 0

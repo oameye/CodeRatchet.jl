@@ -4,7 +4,7 @@
 
 [provenance]
 aggregation = "max_and_count_over_threshold"
-commit = "9da4a1e"
+commit = "3767ba3"
 metric = "complexity"
 tool = "CodeComplexity"
 binding = ["cyc", "cog", "arg", "cyc_over", "cog_over", "arg_over"]
@@ -27,9 +27,9 @@ arg = 5
 cyc_over = 0
 cog_over = 0
 arg_over = 0
-cyc_sum = 107
-cog_sum = 71
-arg_sum = 87
+cyc_sum = 113
+cog_sum = 75
+arg_sum = 90
 
 [files."src/all.jl"]
 cyc = 6
@@ -63,6 +63,28 @@ arg_over = 0
 cyc_sum = 81
 cog_sum = 70
 arg_sum = 35
+
+[files."src/coldstart.jl"]
+cyc = 6
+cog = 10
+arg = 6
+cyc_over = 0
+cog_over = 0
+arg_over = 0
+cyc_sum = 128
+cog_sum = 99
+arg_sum = 128
+
+[files."src/coldstart_cli.jl"]
+cyc = 8
+cog = 8
+arg = 3
+cyc_over = 0
+cog_over = 0
+arg_over = 0
+cyc_sum = 22
+cog_sum = 18
+arg_sum = 10
 
 [files."src/complexity.jl"]
 cyc = 5

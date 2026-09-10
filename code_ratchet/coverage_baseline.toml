@@ -4,7 +4,7 @@
 
 [provenance]
 attribution = "top_level_definition_ranges"
-commit = "9da4a1e"
+commit = "3767ba3"
 metric = "coverage"
 source = "lcov"
 binding = ["misses"]
@@ -14,7 +14,7 @@ lines = 56
 misses = 20
 
 [files."src/CodeRatchet.jl"]
-lines = 231
+lines = 243
 misses = 11
 
 [files."src/all.jl"]
@@ -28,6 +28,14 @@ misses = 39
 [files."src/cli.jl"]
 lines = 184
 misses = 118
+
+[files."src/coldstart.jl"]
+lines = 358
+misses = 0
+
+[files."src/coldstart_cli.jl"]
+lines = 44
+misses = 0
 
 [files."src/complexity.jl"]
 lines = 22

@@ -3,7 +3,7 @@
 # judgements live in rulings.toml beside it.
 
 [provenance]
-commit = "9da4a1e"
+commit = "3767ba3"
 metric = "style"
 rules = ["implicit_kwarg", "underscore_name", "union_nothing"]
 binding = ["union_nothing", "underscore_name", "implicit_kwarg"]
@@ -29,6 +29,16 @@ underscore_name = 0
 implicit_kwarg = 0
 
 [files."src/cli.jl"]
+union_nothing = 0
+underscore_name = 0
+implicit_kwarg = 0
+
+[files."src/coldstart.jl"]
+union_nothing = 0
+underscore_name = 0
+implicit_kwarg = 0
+
+[files."src/coldstart_cli.jl"]
 union_nothing = 0
 underscore_name = 0
 implicit_kwarg = 0

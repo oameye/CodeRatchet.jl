@@ -56,6 +56,14 @@ jobs:
       # unpinned tool reddens the gate for a change nobody made.
       jetls-rev: '6893fcef26708d64360c048e039102c76ad032c0'
 
+  # Timing cannot share the ordinary ratchet job: it needs both exact PR
+  # revisions on one runner and multiple independent fresh-process samples.
+  # Running this package through its own workflow keeps that protocol tested.
+  coldstart:
+    name: Cold-start self-check
+    if: github.event_name == 'pull_request'
+    uses: ./.github/workflows/coldstart.yml
+
   format:
     name: Format
     runs-on: ubuntu-latest

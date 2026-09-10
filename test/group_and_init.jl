@@ -235,3 +235,5 @@ end
     @test occursin("Replace this reason", unmeasured_reason("weird/"))
   end
 end
+
+include("coldstart_metric.jl")

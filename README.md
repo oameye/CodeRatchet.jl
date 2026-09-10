@@ -149,6 +149,36 @@ Narrowing is a legitimate thing to want: a repository whose JET is already
 gated absolutely by another workflow should not pay for JET twice. Widening
 would be a second source of truth, so it is refused.
 
+### Cold-start regression tracking
+
+Cold-start is a separate paired experiment rather than a persistent metric.
+It compares exact base and head revisions on the same runner, with independent
+target-package cache builds and fresh Julia processes for each scenario sample.
+Only package precompile time and total time-to-first-execution gate; import,
+compilation/recompilation, warm latency and cache bytes remain diagnostic context.
+
+Put representative zero-argument workloads in
+`benchmark/precompile/scenarios.jl` as an ordered named tuple named
+`PRECOMPILE_BENCHMARKS`. For an ordinary PR, CodeRatchet deliberately uses the
+**base revision's** scenario file for both revisions, so the candidate cannot
+silently redefine the benchmark that judges it. The head scenario file is used
+only to bootstrap a repository whose base has no scenario registry yet. The
+result artifact records `scenario_source`, `scenario_path` and `scenario_hash`.
+
+```toml
+[coldstart]
+scenarios = "benchmark/precompile/scenarios.jl"
+builds = 2
+samples = 5
+absolute_ms = 50
+relative = 0.05
+precompile_tasks = 1
+```
+
+The reusable `coldstart.yml` workflow performs the paired comparison. Timing is
+intentionally not written into the normal CodeRatchet baseline: runner noise is
+handled by same-run base/head comparison and explicit materiality floors instead.
+
 ### By hand
 
 

@@ -519,11 +519,30 @@ function coldstart_file_hash(path::AbstractString)
   end
 end
 
+function coldstart_scenario_file(
+  base::AbstractString, head::AbstractString, config::ColdStartConfig
+)
+  if isabspath(config.scenarios)
+    isfile(config.scenarios) ||
+      error("cold-start scenario registry not found: $(config.scenarios)")
+    return (file=String(config.scenarios), source="absolute")
+  end
+
+  base_file = joinpath(base, config.scenarios)
+  isfile(base_file) && return (file=base_file, source="base")
+
+  head_file = joinpath(head, config.scenarios)
+  isfile(head_file) || error("cold-start scenario registry not found: $head_file")
+  return (file=head_file, source="head-bootstrap")
+end
+
 function write_coldstart_results(
   report::ColdStartReport,
   output_dir::AbstractString,
   base::AbstractString,
-  head::AbstractString,
+  head::AbstractString;
+  scenario_file::AbstractString="",
+  scenario_source::AbstractString="head",
 )
   mkpath(output_dir)
 
@@ -567,11 +586,15 @@ function write_coldstart_results(
   end
 
   write(joinpath(output_dir, "summary.md"), coldstart_markdown(report))
-  scenario_file = if isabspath(report.config.scenarios)
-  report.config.scenarios
-else
-  joinpath(head, report.config.scenarios)
-end
+  selected_scenario_file = if isempty(scenario_file)
+    if isabspath(report.config.scenarios)
+      report.config.scenarios
+    else
+      joinpath(head, report.config.scenarios)
+    end
+  else
+    String(scenario_file)
+  end
   open(joinpath(output_dir, "metadata.txt"), "w") do io
     println(io, "julia=", VERSION)
     println(io, "cpu_target=", unsafe_string(Base.JLOptions().cpu_target))
@@ -579,7 +602,9 @@ end
     println(io, "runner_image=", get(ENV, "ImageVersion", "unknown"))
     println(io, "base_commit=", full_commit(base))
     println(io, "head_commit=", full_commit(head))
-    println(io, "scenario_hash=", coldstart_file_hash(scenario_file))
+    println(io, "scenario_source=", scenario_source)
+    println(io, "scenario_path=", report.config.scenarios)
+    println(io, "scenario_hash=", coldstart_file_hash(selected_scenario_file))
     println(io, "builds=", report.config.builds)
     println(io, "samples=", report.config.samples)
     println(io, "absolute_ns=", report.config.absolute_ns)
@@ -704,7 +729,8 @@ The experiment owns fresh temporary depots. Dependency installation and one
 unmeasured package-cache build happen first. Each measured build then gets a
 fresh writable depot layered over the seeded dependency depot. Build order
 alternates base/head then head/base to reduce monotonic runner drift, and every
-scenario sample runs in a fresh Julia process.
+scenario sample runs in a fresh Julia process. A relative scenario registry is
+frozen to the base revision; head is used only when the base has no registry yet.
 
 Only target-package precompile time and total time-to-first-execution bind in
 this first version. Import, compilation, recompilation, warm latency and cache
@@ -731,18 +757,23 @@ function coldstart_compare(
   config_dir =
     isabspath(ratchet_dir) ? String(ratchet_dir) : joinpath(head_path, ratchet_dir)
   config = coldstart_config(head_path; dir=config_dir)
-  scenario_file =
-    isabspath(config.scenarios) ? config.scenarios : joinpath(head_path, config.scenarios)
-  isfile(scenario_file) || error("cold-start scenario registry not found: $scenario_file")
+  scenario = coldstart_scenario_file(base_path, head_path, config)
 
   scenarios, builds, samples = mktempdir() do temporary
     return run_coldstart_experiment(
-      base_path, head_path, package, scenario_file, config, temporary
+      base_path, head_path, package, scenario.file, config, temporary
     )
   end
 
   verdicts = coldstart_verdicts(config, scenarios, builds, samples)
   report = ColdStartReport(config, scenarios, builds, samples, verdicts)
-  isempty(output_dir) || write_coldstart_results(report, output_dir, base_path, head_path)
+  isempty(output_dir) || write_coldstart_results(
+    report,
+    output_dir,
+    base_path,
+    head_path;
+    scenario_file=scenario.file,
+    scenario_source=scenario.source,
+  )
   return report
 end

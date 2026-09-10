@@ -59,6 +59,34 @@ end
     end
   end
 
+  @testset "scenario registry is frozen to base after bootstrap" begin
+    mktempdir() do root
+      base = joinpath(root, "base")
+      head = joinpath(root, "head")
+      mkpath(base)
+      mkpath(head)
+      config = CodeRatchet.ColdStartConfig("scenarios.jl", 1, 1, 0, 0.0, 1)
+
+      write(
+        joinpath(head, "scenarios.jl"),
+        "head
+",
+      )
+      scenario = CodeRatchet.coldstart_scenario_file(base, head, config)
+      @test scenario.source == "head-bootstrap"
+      @test scenario.file == joinpath(head, "scenarios.jl")
+
+      write(
+        joinpath(base, "scenarios.jl"),
+        "base
+",
+      )
+      scenario = CodeRatchet.coldstart_scenario_file(base, head, config)
+      @test scenario.source == "base"
+      @test scenario.file == joinpath(base, "scenarios.jl")
+    end
+  end
+
   @testset "median and materiality are exact" begin
     @test CodeRatchet.median_int([9, 1, 5]) == 5
     @test CodeRatchet.median_int([1, 3, 7, 9]) == 5
@@ -164,7 +192,15 @@ end
     verdicts = CodeRatchet.coldstart_verdicts(config, ["solve"], builds, samples)
     report = CodeRatchet.ColdStartReport(config, ["solve"], builds, samples, verdicts)
     mktempdir() do output
-      CodeRatchet.write_coldstart_results(report, output, pwd(), pwd())
+      scenario_file = joinpath(output, "scenarios.jl")
+      write(
+        scenario_file,
+        "nothing
+",
+      )
+      CodeRatchet.write_coldstart_results(
+        report, output, pwd(), pwd(); scenario_file, scenario_source="base"
+      )
       @test isfile(joinpath(output, "builds.tsv"))
       @test isfile(joinpath(output, "samples.tsv"))
       @test isfile(joinpath(output, "summary.md"))
@@ -172,7 +208,10 @@ end
       @test occursin("julia=$(VERSION)", metadata)
       @test occursin("cpu_target=", metadata)
       @test occursin("runner_image=", metadata)
+      @test occursin("scenario_source=base", metadata)
+      @test occursin("scenario_path=scenarios.jl", metadata)
       @test occursin("scenario_hash=", metadata)
+      @test !occursin("scenario_hash=unknown", metadata)
     end
   end
 
@@ -268,6 +307,7 @@ end
       @test countlines(joinpath(output, "samples.tsv")) == 3
       @test occursin("| smoke |", read(joinpath(output, "summary.md"), String))
       metadata = read(joinpath(output, "metadata.txt"), String)
+      @test occursin("scenario_source=head-bootstrap", metadata)
       @test !occursin("scenario_hash=unknown", metadata)
     end
   end

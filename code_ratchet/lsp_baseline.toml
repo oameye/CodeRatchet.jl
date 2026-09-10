@@ -3,14 +3,16 @@
 # judgements live in rulings.toml beside it.
 
 [provenance]
-commit = "9da4a1e"
+binding = ["reviewed"]
+commit = "46d944f"
+direction = ["down"]
 entry = ["src/CodeRatchet.jl"]
 full_analysis = true
 metric = "lsp"
+schema = 1
 severity = "hint"
 tool = "jetls"
-version = "jetls version 2026-08-23, julia version 1.12.7"
-binding = ["reviewed"]
+version = "jetls version 2026-08-23, julia version 1.13.0"
 
 [files."ext/CodeRatchetJETExt.jl"]
 raw = 0

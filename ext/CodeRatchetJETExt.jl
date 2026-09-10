@@ -60,6 +60,8 @@ function CodeRatchet.provenance(::Inference, root::AbstractString)
   settings = jet_settings(read_rulings(ratchet_dir(root)))
   return Dict{String,Any}(
     "metric" => "jet",
+    "tool" => "JET",
+    "version" => string(Base.pkgversion(JET)),
     "attribution" => "deepest_repository_frame",
     "package" => settings.package,
     "load_set" => sort(settings.load),

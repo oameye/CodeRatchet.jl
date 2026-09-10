@@ -136,6 +136,28 @@ tree, so it is context for a reader.
 provenance(::Metric, ::AbstractString) = Dict{String,Any}()
 
 """
+    metric_schema(metric) -> Int
+
+Version of the metric's measurement semantics. Increment it when the same
+configuration would produce numbers with a different meaning.
+"""
+metric_schema(::Metric) = 1
+
+"""
+    measurement_provenance(metric, root) -> Dict{String,Any}
+
+Complete semantic identity of one measurement. Every field except `commit`
+binds: a baseline is comparable only when the semantic key set and values agree.
+"""
+function measurement_provenance(metric::Metric, root::AbstractString)
+  result = copy(provenance(metric, root))
+  result["schema"] = metric_schema(metric)
+  result["binding"] = collect(binding(metric))
+  result["direction"] = [string(direction(metric, key)) for key in binding(metric)]
+  return result
+end
+
+"""
     entry_failures(metric, root, paths, rows) -> Vector{String}
 
 Extra failures a metric demands of files entering with no baseline row.
@@ -272,10 +294,9 @@ function render_baseline(metric::Metric, rows::Dict{String,Row}, root::AbstractS
   println(io, "# judgements live in $RULINGS beside it.")
   println(io)
   println(io, "[provenance]")
-  for (key, value) in sort(collect(provenance(metric, root)); by=first)
+  for (key, value) in sort(collect(measurement_provenance(metric, root)); by=first)
     println(io, key, " = ", tomlvalue(value))
   end
-  println(io, "binding = ", tomlvalue(collect(binding(metric))))
   for file in sort(collect(keys(rows)))
     println(io)
     println(io, "[files.", repr(file), "]")
@@ -642,6 +663,25 @@ function refresh(
   accept_change::Bool=false,
 )
   report = check(metric, root; dir)
+  human_rulings = ruling_failures(metric, root)
+  isempty(human_rulings) || error(
+    "refresh refused: fix invalid rulings before changing a generated baseline: " *
+    join(human_rulings, "; "),
+  )
+
+  baseline, recorded = read_baseline(metric, dir)
+  provenance_bad = if baseline === nothing || isempty(baseline)
+    String[]
+  else
+    provenance_failures(metric, recorded, root)
+  end
+  if !accept_change && !isempty(provenance_bad)
+    error(
+      "refresh refused: this baseline was measured under incompatible provenance. " *
+      "Review the semantic/tool change, then re-run with --accept-change to migrate it deliberately. " *
+      join(provenance_bad, "; "),
+    )
+  end
   if !accept_change && !isempty(report.violations)
     error(refuse_rise(metric_name(metric), report.violations))
   end
@@ -676,16 +716,32 @@ different tool, so comparing them at all would be meaningless.
 function provenance_failures(
   metric::Metric, recorded::Dict{String,Any}, root::AbstractString
 )
-  isempty(recorded) && return String[]
+  expected = measurement_provenance(metric, root)
+  comparable_keys(table) = Set(k for k in keys(table) if k != "commit")
+  expected_keys = comparable_keys(expected)
+  recorded_keys = comparable_keys(recorded)
   bad = String[]
-  for (key, value) in sort(collect(provenance(metric, root)); by=first)
-    key == "commit" && continue
-    haskey(recorded, key) || continue
-    recorded[key] == value && continue
+
+  for key in sort!(collect(setdiff(expected_keys, recorded_keys)))
+    push!(
+      bad,
+      "provenance missing from the baseline: $key is now required as " *
+      "$(repr(expected[key])). Refresh the baseline in the same commit that moved the tool.",
+    )
+  end
+  for key in sort!(collect(setdiff(recorded_keys, expected_keys)))
+    push!(
+      bad,
+      "stale provenance in the baseline: $key = $(repr(recorded[key])) is no longer " *
+      "part of this metric. Refresh the baseline in the same commit that moved the tool.",
+    )
+  end
+  for key in sort!(collect(intersect(expected_keys, recorded_keys)))
+    recorded[key] == expected[key] && continue
     push!(
       bad,
       "provenance moved under the baseline: $key was $(repr(recorded[key])), " *
-      "now $(repr(value)). Refresh the baseline in the same commit that moved the tool.",
+      "now $(repr(expected[key])). Refresh the baseline in the same commit that moved the tool.",
     )
   end
   return bad

@@ -1,3 +1,4 @@
+using CodeComplexity: CodeComplexity
 using CodeComplexity:
   ArgumentCountComplexity, CognitiveComplexity, CyclomaticComplexity, measure_file
 
@@ -61,6 +62,7 @@ function provenance(::Complexity, root::AbstractString)
   return Dict{String,Any}(
     "metric" => "complexity",
     "tool" => "CodeComplexity",
+    "version" => string(Base.pkgversion(CodeComplexity)),
     # Changed when the count of definitions above threshold was added. An older
     # baseline carries the previous value and fails provenance, which says what
     # happened; without the change it would instead produce a wall of

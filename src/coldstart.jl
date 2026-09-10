@@ -57,9 +57,23 @@ struct ColdStartReport
   verdicts::Vector{ColdStartVerdict}
 end
 
-ok(report::ColdStartReport) = all(v -> !v.failed, report.verdicts)
+struct ColdStartTarget
+  variant::String
+  checkout::String
+  environment::String
+end
 
-function _coldstart_positive(value, name::AbstractString)
+struct ColdStartContext
+  package::String
+  scenario_file::String
+  config::ColdStartConfig
+  seed_depot::String
+  scenarios::Vector{String}
+end
+
+ok(report::ColdStartReport) = all(verdict -> !verdict.failed, report.verdicts)
+
+function coldstart_positive(value, name::AbstractString)
   n = try
     Int(value)
   catch
@@ -85,9 +99,9 @@ function coldstart_config(
 )
   block = get(read_rulings(dir).raw, "coldstart", Dict{String,Any}())
   scenarios = String(get(block, "scenarios", "benchmark/precompile/scenarios.jl"))
-  builds = _coldstart_positive(get(block, "builds", 2), "builds")
-  samples = _coldstart_positive(get(block, "samples", 5), "samples")
-  precompile_tasks = _coldstart_positive(
+  builds = coldstart_positive(get(block, "builds", 2), "builds")
+  samples = coldstart_positive(get(block, "samples", 5), "samples")
+  precompile_tasks = coldstart_positive(
     get(block, "precompile_tasks", 1), "precompile_tasks"
   )
 
@@ -115,7 +129,7 @@ function coldstart_config(
   )
 end
 
-function _median_int(values::Vector{Int})
+function median_int(values::Vector{Int})
   isempty(values) && error("cannot take the median of no cold-start samples")
   ordered = sort(copy(values))
   n = length(ordered)
@@ -124,94 +138,102 @@ function _median_int(values::Vector{Int})
   return lo + (hi - lo) ÷ 2
 end
 
-function _material_threshold(config::ColdStartConfig, baseline_ns::Int)
+function material_threshold(config::ColdStartConfig, baseline_ns::Int)
   relative_ns = ceil(Int, config.relative * baseline_ns)
   return max(config.absolute_ns, relative_ns)
 end
 
-function _material_regression(config::ColdStartConfig, baseline_ns::Int, current_ns::Int)
-  return current_ns - baseline_ns >= _material_threshold(config, baseline_ns)
+function material_regression(config::ColdStartConfig, baseline_ns::Int, current_ns::Int)
+  return current_ns - baseline_ns >= material_threshold(config, baseline_ns)
 end
 
-function _build_record(builds, variant::AbstractString, build::Int)
-  matches = [b for b in builds if b.variant == variant && b.build == build]
+function build_record(builds::Vector{ColdStartBuild}, variant::AbstractString, build::Int)
+  matches = [row for row in builds if row.variant == variant && row.build == build]
   length(matches) == 1 ||
     error("cold-start result has $(length(matches)) $variant build-$build rows")
   return only(matches)
 end
 
-function _scenario_median(
-  samples, variant::AbstractString, build::Int, scenario::AbstractString, key
+function scenario_median(
+  samples::Vector{ColdStartSample},
+  variant::AbstractString,
+  build::Int,
+  scenario::AbstractString,
+  key::Symbol,
 )
   rows = [
-    s for s in samples if s.variant == variant && s.build == build && s.scenario == scenario
+    row for row in samples if
+    row.variant == variant && row.build == build && row.scenario == scenario
   ]
   isempty(rows) && error("cold-start result has no $variant build-$build/$scenario samples")
-  return _median_int(Int[getproperty(row, key) for row in rows])
+  return median_int(Int[getproperty(row, key) for row in rows])
 end
 
-function _coldstart_verdicts(
+function precompile_verdict(
+  config::ColdStartConfig, builds::Vector{ColdStartBuild}
+)
+  baseline = Int[]
+  current = Int[]
+  regressions = 0
+  for build in 1:config.builds
+    base_ns = build_record(builds, "base", build).precompile_ns
+    head_ns = build_record(builds, "head", build).precompile_ns
+    push!(baseline, base_ns)
+    push!(current, head_ns)
+    material_regression(config, base_ns, head_ns) && (regressions += 1)
+  end
+  return ColdStartVerdict(
+    "precompile",
+    median_int(baseline),
+    median_int(current),
+    regressions,
+    config.builds,
+    regressions == config.builds,
+  )
+end
+
+function scenario_verdict(
+  config::ColdStartConfig,
+  samples::Vector{ColdStartSample},
+  scenario::AbstractString,
+)
+  baseline = Int[]
+  current = Int[]
+  regressions = 0
+  for build in 1:config.builds
+    base_ns = scenario_median(samples, "base", build, scenario, :total_ns)
+    head_ns = scenario_median(samples, "head", build, scenario, :total_ns)
+    push!(baseline, base_ns)
+    push!(current, head_ns)
+    material_regression(config, base_ns, head_ns) && (regressions += 1)
+  end
+  return ColdStartVerdict(
+    String(scenario),
+    median_int(baseline),
+    median_int(current),
+    regressions,
+    config.builds,
+    regressions == config.builds,
+  )
+end
+
+function coldstart_verdicts(
   config::ColdStartConfig,
   scenarios::Vector{String},
   builds::Vector{ColdStartBuild},
   samples::Vector{ColdStartSample},
 )
-  verdicts = ColdStartVerdict[]
-
-  base_precompile = Int[]
-  head_precompile = Int[]
-  precompile_regressions = 0
-  for build in 1:config.builds
-    base = _build_record(builds, "base", build).precompile_ns
-    head = _build_record(builds, "head", build).precompile_ns
-    push!(base_precompile, base)
-    push!(head_precompile, head)
-    _material_regression(config, base, head) && (precompile_regressions += 1)
-  end
-  push!(
-    verdicts,
-    ColdStartVerdict(
-      "precompile",
-      _median_int(base_precompile),
-      _median_int(head_precompile),
-      precompile_regressions,
-      config.builds,
-      precompile_regressions == config.builds,
-    ),
-  )
-
-  for scenario in scenarios
-    base_totals = Int[]
-    head_totals = Int[]
-    regressions = 0
-    for build in 1:config.builds
-      base = _scenario_median(samples, "base", build, scenario, :total_ns)
-      head = _scenario_median(samples, "head", build, scenario, :total_ns)
-      push!(base_totals, base)
-      push!(head_totals, head)
-      _material_regression(config, base, head) && (regressions += 1)
-    end
-    push!(
-      verdicts,
-      ColdStartVerdict(
-        scenario,
-        _median_int(base_totals),
-        _median_int(head_totals),
-        regressions,
-        config.builds,
-        regressions == config.builds,
-      ),
-    )
-  end
+  verdicts = ColdStartVerdict[precompile_verdict(config, builds)]
+  append!(verdicts, [scenario_verdict(config, samples, scenario) for scenario in scenarios])
   return verdicts
 end
 
-function _format_ns(ns::Int)
+function format_ns(ns::Int)
   ns >= 1_000_000_000 && return string(round(ns / 1.0e9; digits=3), " s")
   return string(round(ns / 1.0e6; digits=1), " ms")
 end
 
-function _delta_percent(now::Int, before::Int)
+function delta_percent(now::Int, before::Int)
   iszero(before) && return "n/a"
   value = round(100 * (now - before) / before; digits=1)
   return (value > 0 ? "+" : "") * string(value) * "%"
@@ -227,11 +249,11 @@ function coldstart_markdown(report::ColdStartReport)
       "| ",
       verdict.subject,
       " | ",
-      _format_ns(verdict.baseline_ns),
+      format_ns(verdict.baseline_ns),
       " | ",
-      _format_ns(verdict.current_ns),
+      format_ns(verdict.current_ns),
       " | ",
-      _delta_percent(verdict.current_ns, verdict.baseline_ns),
+      delta_percent(verdict.current_ns, verdict.baseline_ns),
       " | ",
       verdict.regressed_builds,
       "/",
@@ -246,18 +268,18 @@ end
 
 function Base.show(io::IO, report::ColdStartReport)
   println(io, "CodeRatchet coldstart: ", ok(report) ? "PASS" : "FAIL")
-  width = maximum(length(v.subject) for v in report.verdicts)
+  width = maximum(length(verdict.subject) for verdict in report.verdicts)
   for verdict in report.verdicts
     println(
       io,
       "  ",
       rpad(verdict.subject, width),
       "  ",
-      _format_ns(verdict.baseline_ns),
+      format_ns(verdict.baseline_ns),
       " -> ",
-      _format_ns(verdict.current_ns),
+      format_ns(verdict.current_ns),
       "  ",
-      _delta_percent(verdict.current_ns, verdict.baseline_ns),
+      delta_percent(verdict.current_ns, verdict.baseline_ns),
       "  material ",
       verdict.regressed_builds,
       "/",
@@ -268,15 +290,15 @@ function Base.show(io::IO, report::ColdStartReport)
   return nothing
 end
 
-function _julia_command(args::Vector{String}; dir::AbstractString)
+function julia_command(args::Vector{String}; dir::AbstractString)
   cmd = `$(Base.julia_cmd()) --startup-file=no --history-file=no $args`
   return Cmd(cmd; dir=String(dir))
 end
 
-function _coldstart_env(
+function coldstart_env(
   cmd::Cmd, depot::AbstractString; offline::Bool=false, precompile_tasks::Int=1
 )
-  env = Dict{String,String}(String(k) => String(v) for (k, v) in ENV)
+  env = Dict{String,String}(String(key) => String(value) for (key, value) in ENV)
   env["JULIA_DEPOT_PATH"] = String(depot)
   # Pkg.test and some CI harnesses deliberately narrow JULIA_LOAD_PATH. A
   # cold-start child must not inherit that process-local choice or even stdlibs
@@ -291,7 +313,7 @@ function _coldstart_env(
   return setenv(cmd, env)
 end
 
-const _PREPARE_ENVIRONMENT = raw"""
+const PREPARE_ENVIRONMENT = raw"""
 using Pkg
 Pkg.autoprecompilation_enabled(false)
 Pkg.activate(ARGS[1]; io=devnull)
@@ -300,7 +322,7 @@ Pkg.instantiate(; io=devnull)
 Pkg.precompile(; io=devnull)
 """
 
-const _PRECOMPILE_ENVIRONMENT = raw"""
+const PRECOMPILE_ENVIRONMENT = raw"""
 using Pkg
 Pkg.autoprecompilation_enabled(false)
 Pkg.activate(ARGS[1]; io=devnull)
@@ -309,21 +331,18 @@ Pkg.precompile(; io=devnull)
 println("BUILD\t", time_ns() - started)
 """
 
-function _prepare_environment(
-  checkout::AbstractString,
-  environment::AbstractString,
-  depot::AbstractString,
-  config::ColdStartConfig,
+function prepare_environment(
+  target::ColdStartTarget, depot::AbstractString, config::ColdStartConfig
 )
-  mkpath(environment)
-  cmd = _julia_command(
-    ["-e", _PREPARE_ENVIRONMENT, String(environment), String(checkout)]; dir=checkout
+  mkpath(target.environment)
+  cmd = julia_command(
+    ["-e", PREPARE_ENVIRONMENT, target.environment, target.checkout]; dir=target.checkout
   )
-  run(_coldstart_env(cmd, depot; precompile_tasks=config.precompile_tasks))
+  run(coldstart_env(cmd, depot; precompile_tasks=config.precompile_tasks))
   return nothing
 end
 
-function _package_cache_dirs(depot::AbstractString, package::AbstractString)
+function package_cache_dirs(depot::AbstractString, package::AbstractString)
   compiled = joinpath(depot, "compiled")
   isdir(compiled) || return String[]
   found = String[]
@@ -335,14 +354,14 @@ function _package_cache_dirs(depot::AbstractString, package::AbstractString)
   return unique(found)
 end
 
-function _remove_package_cache(depot::AbstractString, package::AbstractString)
-  for path in _package_cache_dirs(depot, package)
+function remove_package_cache(depot::AbstractString, package::AbstractString)
+  for path in package_cache_dirs(depot, package)
     rm(path; recursive=true, force=true)
   end
   return nothing
 end
 
-function _tree_bytes(root::AbstractString)
+function tree_bytes(root::AbstractString)
   total = 0
   for (dir, _, files) in walkdir(root)
     for file in files
@@ -352,30 +371,27 @@ function _tree_bytes(root::AbstractString)
   return total
 end
 
-function _package_cache_bytes(depot::AbstractString, package::AbstractString)
-  return sum((_tree_bytes(path) for path in _package_cache_dirs(depot, package)); init=0)
+function package_cache_bytes(depot::AbstractString, package::AbstractString)
+  return sum((tree_bytes(path) for path in package_cache_dirs(depot, package)); init=0)
 end
 
-function _layered_depot(first::AbstractString, second::AbstractString)
+function layered_depot(first::AbstractString, second::AbstractString)
   return String(first) * string(Sys.iswindows() ? ';' : ':') * String(second)
 end
 
-function _precompile_environment(
-  checkout::AbstractString,
-  environment::AbstractString,
-  run_depot::AbstractString,
-  seed_depot::AbstractString,
-  package::AbstractString,
-  config::ColdStartConfig,
+function precompile_environment(
+  target::ColdStartTarget, context::ColdStartContext, run_depot::AbstractString
 )
   mkpath(run_depot)
-  cmd = _julia_command(["-e", _PRECOMPILE_ENVIRONMENT, String(environment)]; dir=checkout)
+  cmd = julia_command(
+    ["-e", PRECOMPILE_ENVIRONMENT, target.environment]; dir=target.checkout
+  )
   output = read(
-    _coldstart_env(
+    coldstart_env(
       cmd,
-      _layered_depot(run_depot, seed_depot);
+      layered_depot(run_depot, context.seed_depot);
       offline=true,
-      precompile_tasks=config.precompile_tasks,
+      precompile_tasks=context.config.precompile_tasks,
     ),
     String,
   )
@@ -384,39 +400,41 @@ function _precompile_environment(
   fields = split(only(rows), '\t')
   length(fields) == 2 || error("malformed cold-start BUILD row")
   elapsed = parse(Int, fields[2])
-  return elapsed, _package_cache_bytes(run_depot, package)
+  return elapsed, package_cache_bytes(run_depot, context.package)
 end
 
-function _driver_path()
+function driver_path()
   source = pathof(@__MODULE__)
   source === nothing && error("cannot locate the CodeRatchet package root")
   return joinpath(dirname(dirname(source)), "contrib", "coldstart-driver.jl")
 end
 
-function _driver_output(
-  checkout::AbstractString,
-  environment::AbstractString,
-  depot::AbstractString,
-  package::AbstractString,
-  scenarios::AbstractString,
-  config::ColdStartConfig;
+function driver_output(
+  target::ColdStartTarget,
+  context::ColdStartContext,
+  depot::AbstractString;
   scenario::AbstractString="",
 )
   args = String[
-    "--project=$(String(environment))", _driver_path(), String(package), String(scenarios)
+    "--project=$(target.environment)",
+    driver_path(),
+    context.package,
+    context.scenario_file,
   ]
   isempty(scenario) || push!(args, String(scenario))
-  cmd = _julia_command(args; dir=checkout)
+  cmd = julia_command(args; dir=target.checkout)
   return read(
-    _coldstart_env(cmd, depot; offline=true, precompile_tasks=config.precompile_tasks),
+    coldstart_env(
+      cmd, depot; offline=true, precompile_tasks=context.config.precompile_tasks
+    ),
     String,
   )
 end
 
-function _discover_scenarios(
-  checkout, environment, depot, package, scenario_file, config::ColdStartConfig
+function discover_scenarios(
+  target::ColdStartTarget, context::ColdStartContext, depot::AbstractString
 )
-  output = _driver_output(checkout, environment, depot, package, scenario_file, config)
+  output = driver_output(target, context, depot)
   names = String[]
   for line in split(chomp(output), '\n')
     startswith(line, "SCENARIO\t") || continue
@@ -429,9 +447,9 @@ function _discover_scenarios(
   return names
 end
 
-function _parse_sample(
+function parse_sample(
   output::AbstractString,
-  variant::AbstractString,
+  target::ColdStartTarget,
   build::Int,
   sample::Int,
   expected_scenario::AbstractString,
@@ -444,7 +462,7 @@ function _parse_sample(
     error("cold-start RESULT named $(fields[2]); expected $expected_scenario")
   values = parse.(Int, fields[3:end])
   return ColdStartSample(
-    String(variant),
+    target.variant,
     build,
     sample,
     String(expected_scenario),
@@ -459,25 +477,19 @@ function _parse_sample(
   )
 end
 
-function _scenario_sample(
-  checkout,
-  environment,
-  depot,
-  package,
-  scenario_file,
-  scenario,
-  config,
-  variant,
-  build,
-  sample,
+function scenario_sample(
+  target::ColdStartTarget,
+  context::ColdStartContext,
+  depot::AbstractString,
+  scenario::AbstractString,
+  build::Int,
+  sample::Int,
 )
-  output = _driver_output(
-    checkout, environment, depot, package, scenario_file, config; scenario
-  )
-  return _parse_sample(output, variant, build, sample, scenario)
+  output = driver_output(target, context, depot; scenario)
+  return parse_sample(output, target, build, sample, scenario)
 end
 
-function _project_identity(root::AbstractString)
+function project_identity(root::AbstractString)
   project = TOML.parsefile(joinpath(root, "Project.toml"))
   name = get(project, "name", nothing)
   uuid = get(project, "uuid", nothing)
@@ -486,7 +498,7 @@ function _project_identity(root::AbstractString)
   return (name=name, uuid=uuid)
 end
 
-function _full_commit(root::AbstractString)
+function full_commit(root::AbstractString)
   try
     command = pipeline(Cmd(`git rev-parse HEAD`; dir=root); stderr=devnull)
     return strip(read(command, String))
@@ -506,7 +518,9 @@ function write_coldstart_results(
   open(joinpath(output_dir, "builds.tsv"), "w") do io
     println(io, "variant\tbuild\tprecompile_ns\tcache_bytes")
     for row in report.builds
-      println(io, row.variant, '\t', row.build, '\t', row.precompile_ns, '\t', row.cache_bytes)
+      println(
+        io, row.variant, '\t', row.build, '\t', row.precompile_ns, '\t', row.cache_bytes
+      )
     end
   end
 
@@ -545,8 +559,8 @@ function write_coldstart_results(
     println(io, "julia=", VERSION)
     println(io, "sysimage_target=", Sys.sysimage_target())
     println(io, "machine=", Sys.MACHINE)
-    println(io, "base_commit=", _full_commit(base))
-    println(io, "head_commit=", _full_commit(head))
+    println(io, "base_commit=", full_commit(base))
+    println(io, "head_commit=", full_commit(head))
     println(io, "builds=", report.config.builds)
     println(io, "samples=", report.config.samples)
     println(io, "absolute_ns=", report.config.absolute_ns)
@@ -554,6 +568,116 @@ function write_coldstart_results(
     return println(io, "precompile_tasks=", report.config.precompile_tasks)
   end
   return String(output_dir)
+end
+
+function initial_context(
+  package::AbstractString,
+  scenario_file::AbstractString,
+  config::ColdStartConfig,
+  seed_depot::AbstractString,
+)
+  return ColdStartContext(
+    String(package), String(scenario_file), config, String(seed_depot), String[]
+  )
+end
+
+function run_context(context::ColdStartContext, scenarios::Vector{String})
+  return ColdStartContext(
+    context.package,
+    context.scenario_file,
+    context.config,
+    context.seed_depot,
+    scenarios,
+  )
+end
+
+function warmup_target(
+  target::ColdStartTarget, context::ColdStartContext, temporary::AbstractString
+)
+  warmup_depot = joinpath(temporary, "warmup-" * target.variant)
+  precompile_environment(target, context, warmup_depot)
+  return nothing
+end
+
+function measure_target!(
+  builds::Vector{ColdStartBuild},
+  samples::Vector{ColdStartSample},
+  target::ColdStartTarget,
+  context::ColdStartContext,
+  temporary::AbstractString,
+  build::Int,
+)
+  run_depot = joinpath(temporary, "run-$build-$(target.variant)")
+  precompile_ns, cache_bytes = precompile_environment(target, context, run_depot)
+  push!(builds, ColdStartBuild(target.variant, build, precompile_ns, cache_bytes))
+
+  depot = layered_depot(run_depot, context.seed_depot)
+  for scenario in context.scenarios
+    scenario_sample(target, context, depot, scenario, build, 0)
+    for sample in 1:context.config.samples
+      push!(samples, scenario_sample(target, context, depot, scenario, build, sample))
+    end
+  end
+  return nothing
+end
+
+function measure_build!(
+  builds::Vector{ColdStartBuild},
+  samples::Vector{ColdStartSample},
+  targets::NTuple{2,ColdStartTarget},
+  context::ColdStartContext,
+  temporary::AbstractString,
+  build::Int,
+)
+  order = isodd(build) ? targets : reverse(targets)
+  for target in order
+    measure_target!(builds, samples, target, context, temporary, build)
+  end
+  return nothing
+end
+
+function run_coldstart_experiment(
+  base::AbstractString,
+  head::AbstractString,
+  package::AbstractString,
+  scenario_file::AbstractString,
+  config::ColdStartConfig,
+  temporary::AbstractString,
+)
+  seed_depot = joinpath(temporary, "seed-depot")
+  mkpath(seed_depot)
+
+  base_target = ColdStartTarget(
+    "base", String(base), joinpath(temporary, "base-environment")
+  )
+  head_target = ColdStartTarget(
+    "head", String(head), joinpath(temporary, "head-environment")
+  )
+  targets = (base_target, head_target)
+
+  for target in targets
+    prepare_environment(target, seed_depot, config)
+    remove_package_cache(seed_depot, package)
+  end
+
+  setup = initial_context(package, scenario_file, config, seed_depot)
+  discovery_depot = joinpath(temporary, "discovery-depot")
+  mkpath(discovery_depot)
+  scenarios = discover_scenarios(
+    head_target, setup, layered_depot(discovery_depot, seed_depot)
+  )
+  context = run_context(setup, scenarios)
+
+  for target in targets
+    warmup_target(target, context, temporary)
+  end
+
+  builds = ColdStartBuild[]
+  samples = ColdStartSample[]
+  for build in 1:config.builds
+    measure_build!(builds, samples, targets, context, temporary, build)
+  end
+  return scenarios, builds, samples
 end
 
 """
@@ -580,107 +704,29 @@ function coldstart_compare(
 )
   isdir(base) || error("cold-start base checkout does not exist: $base")
   isdir(head) || error("cold-start head checkout does not exist: $head")
-  base = realpath(base)
-  head = realpath(head)
+  base_path = realpath(base)
+  head_path = realpath(head)
 
-  base_identity = _project_identity(base)
-  head_identity = _project_identity(head)
+  base_identity = project_identity(base_path)
+  head_identity = project_identity(head_path)
   base_identity == head_identity ||
     error("cold-start checkouts name different packages: $base_identity != $head_identity")
   package = head_identity.name
 
-  config_dir = isabspath(ratchet_dir) ? String(ratchet_dir) : joinpath(head, ratchet_dir)
-  config = coldstart_config(head; dir=config_dir)
+  config_dir = isabspath(ratchet_dir) ? String(ratchet_dir) : joinpath(head_path, ratchet_dir)
+  config = coldstart_config(head_path; dir=config_dir)
   scenario_file =
-    isabspath(config.scenarios) ? config.scenarios : joinpath(head, config.scenarios)
+    isabspath(config.scenarios) ? config.scenarios : joinpath(head_path, config.scenarios)
   isfile(scenario_file) || error("cold-start scenario registry not found: $scenario_file")
 
   scenarios, builds, samples = mktempdir() do temporary
-    builds = ColdStartBuild[]
-    samples = ColdStartSample[]
-    seed_depot = joinpath(temporary, "seed-depot")
-    base_environment = joinpath(temporary, "base-environment")
-    head_environment = joinpath(temporary, "head-environment")
-    mkpath(seed_depot)
-
-    _prepare_environment(base, base_environment, seed_depot, config)
-    _remove_package_cache(seed_depot, package)
-    _prepare_environment(head, head_environment, seed_depot, config)
-    _remove_package_cache(seed_depot, package)
-
-    discovery_depot = joinpath(temporary, "discovery-depot")
-    mkpath(discovery_depot)
-    scenarios = _discover_scenarios(
-      head,
-      head_environment,
-      _layered_depot(discovery_depot, seed_depot),
-      package,
-      scenario_file,
-      config,
+    run_coldstart_experiment(
+      base_path, head_path, package, scenario_file, config, temporary
     )
-
-    # Equal discarded work before either side is measured. This absorbs the
-    # one-time filesystem/LLVM effects of generating this package's cache.
-    for (variant, checkout, environment) in
-        (("base", base, base_environment), ("head", head, head_environment))
-      warmup_depot = joinpath(temporary, "warmup-" * variant)
-      _precompile_environment(
-        checkout, environment, warmup_depot, seed_depot, package, config
-      )
-    end
-
-    for build in 1:config.builds
-      order = isodd(build) ? ("base", "head") : ("head", "base")
-      for variant in order
-        checkout = variant == "base" ? base : head
-        environment = variant == "base" ? base_environment : head_environment
-        run_depot = joinpath(temporary, "run-$build-$variant")
-        precompile_ns, cache_bytes = _precompile_environment(
-          checkout, environment, run_depot, seed_depot, package, config
-        )
-        push!(builds, ColdStartBuild(variant, build, precompile_ns, cache_bytes))
-
-        layered = _layered_depot(run_depot, seed_depot)
-        for scenario in scenarios
-          # Discard one process after the cache build to absorb filesystem page
-          # population and driver compilation before recorded samples begin.
-          _scenario_sample(
-            checkout,
-            environment,
-            layered,
-            package,
-            scenario_file,
-            scenario,
-            config,
-            variant,
-            build,
-            0,
-          )
-          for sample in 1:config.samples
-            push!(
-              samples,
-              _scenario_sample(
-                checkout,
-                environment,
-                layered,
-                package,
-                scenario_file,
-                scenario,
-                config,
-                variant,
-                build,
-                sample,
-              ),
-            )
-          end
-        end
-      end
-    end
-    return scenarios, builds, samples
   end
 
-  verdicts = _coldstart_verdicts(config, scenarios, builds, samples)
+  verdicts = coldstart_verdicts(config, scenarios, builds, samples)
   report = ColdStartReport(config, scenarios, builds, samples, verdicts)
-  isempty(output_dir) || write_coldstart_results(report, output_dir, base, head)
+  isempty(output_dir) || write_coldstart_results(report, output_dir, base_path, head_path)
   return report
 end

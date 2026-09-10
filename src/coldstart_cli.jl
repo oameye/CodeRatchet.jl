@@ -24,7 +24,9 @@ function coldstart_flag_value(args, index, flag)
   return String(args[index + 1])
 end
 
-function set_coldstart_option!(options::ColdStartCLIOptions, flag::AbstractString, value::String)
+function set_coldstart_option!(
+  options::ColdStartCLIOptions, flag::AbstractString, value::String
+)
   if flag == "--base"
     options.base = value
   elseif flag == "--head"
@@ -54,10 +56,7 @@ end
 
 function coldstart_report(options::ColdStartCLIOptions)
   return coldstart_compare(
-    options.base,
-    options.head;
-    ratchet_dir=options.ratchet_dir,
-    output_dir=options.output,
+    options.base, options.head; ratchet_dir=options.ratchet_dir, output_dir=options.output
   )
 end
 

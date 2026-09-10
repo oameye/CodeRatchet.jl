@@ -1,0 +1,228 @@
+using Test
+using CodeRatchet
+
+sample(variant, build, sample_id, scenario, total_ns; compile_ns=10_000_000) =
+  CodeRatchet.ColdStartSample(
+    variant,
+    build,
+    sample_id,
+    scenario,
+    20_000_000,
+    total_ns - 20_000_000,
+    compile_ns,
+    0,
+    total_ns,
+    1_000_000,
+    0,
+    0,
+  )
+
+@testset "cold-start comparison" begin
+  @testset "configuration has conservative defaults and validates overrides" begin
+    mktempdir() do root
+      dir = joinpath(root, "code_ratchet")
+      mkpath(dir)
+      write(joinpath(dir, "rulings.toml"), "[scope]\nmeasure = [\"src/\"]\n")
+      config = CodeRatchet.coldstart_config(root; dir)
+      @test config.scenarios == "benchmark/precompile/scenarios.jl"
+      @test config.builds == 2
+      @test config.samples == 5
+      @test config.absolute_ns == 50_000_000
+      @test config.relative == 0.05
+      @test config.precompile_tasks == 1
+
+      write(
+        joinpath(dir, "rulings.toml"),
+        """
+        [coldstart]
+        scenarios = "bench/scenarios.jl"
+        builds = 3
+        samples = 7
+        absolute_ms = 12.5
+        relative = 0.08
+        precompile_tasks = 2
+        """,
+      )
+      config = CodeRatchet.coldstart_config(root; dir)
+      @test config.scenarios == "bench/scenarios.jl"
+      @test config.builds == 3
+      @test config.samples == 7
+      @test config.absolute_ns == 12_500_000
+      @test config.relative == 0.08
+      @test config.precompile_tasks == 2
+
+      write(joinpath(dir, "rulings.toml"), "[coldstart]\nbuilds = 0\n")
+      @test_throws ErrorException CodeRatchet.coldstart_config(root; dir)
+      write(joinpath(dir, "rulings.toml"), "[coldstart]\nrelative = 1.0\n")
+      @test_throws ErrorException CodeRatchet.coldstart_config(root; dir)
+    end
+  end
+
+  @testset "median and materiality are exact" begin
+    @test CodeRatchet._median_int([9, 1, 5]) == 5
+    @test CodeRatchet._median_int([1, 3, 7, 9]) == 5
+    @test_throws ErrorException CodeRatchet._median_int(Int[])
+
+    config = CodeRatchet.ColdStartConfig("scenarios.jl", 2, 3, 50_000_000, 0.05, 1)
+    @test CodeRatchet._material_threshold(config, 200_000_000) == 50_000_000
+    @test CodeRatchet._material_threshold(config, 2_000_000_000) == 100_000_000
+    @test CodeRatchet._material_regression(config, 1_000_000_000, 1_050_000_000)
+    @test !CodeRatchet._material_regression(config, 1_000_000_000, 1_049_999_999)
+  end
+
+  @testset "a noisy signal fails only when every independent build regresses" begin
+    config = CodeRatchet.ColdStartConfig("scenarios.jl", 2, 3, 50_000_000, 0.05, 1)
+    builds = [
+      CodeRatchet.ColdStartBuild("base", 1, 1_000_000_000, 100),
+      CodeRatchet.ColdStartBuild("head", 1, 1_100_000_000, 110),
+      CodeRatchet.ColdStartBuild("base", 2, 1_000_000_000, 100),
+      CodeRatchet.ColdStartBuild("head", 2, 1_020_000_000, 110),
+    ]
+    samples = CodeRatchet.ColdStartSample[]
+    for build in 1:2, sample_id in 1:3
+      push!(samples, sample("base", build, sample_id, "solve", 500_000_000))
+      push!(samples, sample("head", build, sample_id, "solve", 600_000_000))
+    end
+
+    verdicts = CodeRatchet._coldstart_verdicts(config, ["solve"], builds, samples)
+    precompile, solve = verdicts
+    @test precompile.regressed_builds == 1
+    @test !precompile.failed
+    @test solve.regressed_builds == 2
+    @test solve.failed
+
+    report = CodeRatchet.ColdStartReport(config, ["solve"], builds, samples, verdicts)
+    @test !CodeRatchet.ok(report)
+    @test occursin("CodeRatchet coldstart: FAIL", sprint(show, report))
+    markdown = CodeRatchet.coldstart_markdown(report)
+    @test occursin("| precompile |", markdown)
+    @test occursin("| solve |", markdown)
+    @test occursin("FAIL", markdown)
+  end
+
+  @testset "compiler decomposition is context, not an independent noisy gate" begin
+    config = CodeRatchet.ColdStartConfig("scenarios.jl", 1, 1, 50_000_000, 0.05, 1)
+    builds = [
+      CodeRatchet.ColdStartBuild("base", 1, 100_000_000, 100),
+      CodeRatchet.ColdStartBuild("head", 1, 100_000_000, 200),
+    ]
+    samples = [
+      sample("base", 1, 1, "solve", 500_000_000; compile_ns=1_000_000),
+      sample("head", 1, 1, "solve", 500_000_000; compile_ns=400_000_000),
+    ]
+    verdicts = CodeRatchet._coldstart_verdicts(config, ["solve"], builds, samples)
+    report = CodeRatchet.ColdStartReport(config, ["solve"], builds, samples, verdicts)
+    @test CodeRatchet.ok(report)
+    @test all(!v.failed for v in verdicts)
+  end
+
+  @testset "driver rows parse into integer nanosecond observations" begin
+    output = "noise\nRESULT\tsolve\t10\t20\t5\t1\t30\t2\t0\t0\n"
+    parsed = CodeRatchet._parse_sample(output, "head", 2, 3, "solve")
+    @test parsed.variant == "head"
+    @test parsed.build == 2
+    @test parsed.sample == 3
+    @test parsed.total_ns == 30
+    @test parsed.recompile_ns == 1
+    @test_throws ErrorException CodeRatchet._parse_sample(output, "head", 2, 3, "other")
+  end
+
+  @testset "cache helpers measure and remove only the target package" begin
+    mktempdir() do depot
+      target = joinpath(depot, "compiled", "v1.13", "Tiny")
+      other = joinpath(depot, "compiled", "v1.13", "Other")
+      mkpath(target)
+      mkpath(other)
+      write(joinpath(target, "a.ji"), "12345")
+      write(joinpath(other, "b.ji"), "123456789")
+      @test CodeRatchet._package_cache_bytes(depot, "Tiny") == 5
+      CodeRatchet._remove_package_cache(depot, "Tiny")
+      @test CodeRatchet._package_cache_bytes(depot, "Tiny") == 0
+      @test isfile(joinpath(other, "b.ji"))
+    end
+  end
+
+  @testset "results are written with Julia 1.13 compiler provenance" begin
+    config = CodeRatchet.ColdStartConfig("scenarios.jl", 1, 1, 50_000_000, 0.05, 1)
+    builds = [
+      CodeRatchet.ColdStartBuild("base", 1, 100, 10),
+      CodeRatchet.ColdStartBuild("head", 1, 90, 11),
+    ]
+    samples = [sample("base", 1, 1, "solve", 100), sample("head", 1, 1, "solve", 90)]
+    verdicts = CodeRatchet._coldstart_verdicts(config, ["solve"], builds, samples)
+    report = CodeRatchet.ColdStartReport(config, ["solve"], builds, samples, verdicts)
+    mktempdir() do output
+      CodeRatchet.write_coldstart_results(report, output, pwd(), pwd())
+      @test isfile(joinpath(output, "builds.tsv"))
+      @test isfile(joinpath(output, "samples.tsv"))
+      @test isfile(joinpath(output, "summary.md"))
+      metadata = read(joinpath(output, "metadata.txt"), String)
+      @test occursin("julia=1.13", metadata)
+      @test occursin("sysimage_target=", metadata)
+    end
+  end
+
+  @testset "the full experiment works on a dependency-free local package" begin
+    mktempdir() do root
+      base = joinpath(root, "base")
+      head = joinpath(root, "head")
+      for checkout in (base, head)
+        mkpath(joinpath(checkout, "src"))
+        write(
+          joinpath(checkout, "Project.toml"),
+          """
+          name = "TinyColdStart"
+          uuid = "11111111-1111-1111-1111-111111111111"
+          version = "0.1.0"
+          """,
+        )
+        write(
+          joinpath(checkout, "src", "TinyColdStart.jl"),
+          "module TinyColdStart\nf(x) = x + 1\nend\n",
+        )
+      end
+
+      ratchet = joinpath(head, "code_ratchet")
+      scenarios = joinpath(head, "benchmark", "precompile")
+      mkpath(ratchet)
+      mkpath(scenarios)
+      write(
+        joinpath(ratchet, "rulings.toml"),
+        """
+        [coldstart]
+        scenarios = "benchmark/precompile/scenarios.jl"
+        builds = 1
+        samples = 1
+        absolute_ms = 100000
+        relative = 0.0
+        precompile_tasks = 1
+        """,
+      )
+      write(
+        joinpath(scenarios, "scenarios.jl"),
+        """
+        function smoke()
+          value = TinyColdStart.f(1)
+          check(value == 2, "TinyColdStart returned the wrong value")
+          return value
+        end
+        const PRECOMPILE_BENCHMARKS = (smoke=smoke,)
+        """,
+      )
+
+      report = CodeRatchet.coldstart_compare(base, head)
+      @test CodeRatchet.ok(report)
+      @test report.scenarios == ["smoke"]
+      @test length(report.builds) == 2
+      @test length(report.samples) == 2
+      @test all(row.cache_bytes > 0 for row in report.builds)
+    end
+  end
+
+  @testset "the command surface refuses incomplete invocations" begin
+    @test CodeRatchet.coldstart_main(String[]) == 2
+    @test CodeRatchet.coldstart_main(["nope"]) == 2
+    @test CodeRatchet.coldstart_main(["compare"]) == 2
+    @test CodeRatchet.coldstart_main(["compare", "--wat"]) == 2
+  end
+end

@@ -1,3 +1,5 @@
+include("coldstart.jl")
+
 """
 Running every gate a repository has configured, in one invocation.
 

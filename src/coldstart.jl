@@ -87,8 +87,9 @@ function coldstart_config(
   scenarios = String(get(block, "scenarios", "benchmark/precompile/scenarios.jl"))
   builds = _coldstart_positive(get(block, "builds", 2), "builds")
   samples = _coldstart_positive(get(block, "samples", 5), "samples")
-  precompile_tasks =
-    _coldstart_positive(get(block, "precompile_tasks", 1), "precompile_tasks")
+  precompile_tasks = _coldstart_positive(
+    get(block, "precompile_tasks", 1), "precompile_tasks"
+  )
 
   absolute_ms = try
     Float64(get(block, "absolute_ms", 50.0))
@@ -143,8 +144,7 @@ function _scenario_median(
   samples, variant::AbstractString, build::Int, scenario::AbstractString, key
 )
   rows = [
-    s for s in samples
-    if s.variant == variant && s.build == build && s.scenario == scenario
+    s for s in samples if s.variant == variant && s.build == build && s.scenario == scenario
   ]
   isempty(rows) && error("cold-start result has no $variant build-$build/$scenario samples")
   return _median_int(Int[getproperty(row, key) for row in rows])
@@ -274,10 +274,7 @@ function _julia_command(args::Vector{String}; dir::AbstractString)
 end
 
 function _coldstart_env(
-  cmd::Cmd,
-  depot::AbstractString;
-  offline::Bool=false,
-  precompile_tasks::Int=1,
+  cmd::Cmd, depot::AbstractString; offline::Bool=false, precompile_tasks::Int=1
 )
   env = Dict{String,String}(String(k) => String(v) for (k, v) in ENV)
   env["JULIA_DEPOT_PATH"] = String(depot)
@@ -372,9 +369,7 @@ function _precompile_environment(
   config::ColdStartConfig,
 )
   mkpath(run_depot)
-  cmd = _julia_command(
-    ["-e", _PRECOMPILE_ENVIRONMENT, String(environment)]; dir=checkout
-  )
+  cmd = _julia_command(["-e", _PRECOMPILE_ENVIRONMENT, String(environment)]; dir=checkout)
   output = read(
     _coldstart_env(
       cmd,
@@ -413,24 +408,15 @@ function _driver_output(
   isempty(scenario) || push!(args, String(scenario))
   cmd = _julia_command(args; dir=checkout)
   return read(
-    _coldstart_env(
-      cmd, depot; offline=true, precompile_tasks=config.precompile_tasks
-    ),
+    _coldstart_env(cmd, depot; offline=true, precompile_tasks=config.precompile_tasks),
     String,
   )
 end
 
 function _discover_scenarios(
-  checkout,
-  environment,
-  depot,
-  package,
-  scenario_file,
-  config::ColdStartConfig,
+  checkout, environment, depot, package, scenario_file, config::ColdStartConfig
 )
-  output = _driver_output(
-    checkout, environment, depot, package, scenario_file, config
-  )
+  output = _driver_output(checkout, environment, depot, package, scenario_file, config)
   names = String[]
   for line in split(chomp(output), '\n')
     startswith(line, "SCENARIO\t") || continue
@@ -454,9 +440,8 @@ function _parse_sample(
   length(rows) == 1 || error("cold-start scenario emitted $(length(rows)) RESULT rows")
   fields = split(only(rows), '\t')
   length(fields) == 10 || error("malformed cold-start RESULT row")
-  fields[2] == expected_scenario || error(
-    "cold-start RESULT named $(fields[2]); expected $expected_scenario"
-  )
+  fields[2] == expected_scenario ||
+    error("cold-start RESULT named $(fields[2]); expected $expected_scenario")
   values = parse.(Int, fields[3:end])
   return ColdStartSample(
     String(variant),
@@ -487,13 +472,7 @@ function _scenario_sample(
   sample,
 )
   output = _driver_output(
-    checkout,
-    environment,
-    depot,
-    package,
-    scenario_file,
-    config;
-    scenario,
+    checkout, environment, depot, package, scenario_file, config; scenario
   )
   return _parse_sample(output, variant, build, sample, scenario)
 end
@@ -502,9 +481,8 @@ function _project_identity(root::AbstractString)
   project = TOML.parsefile(joinpath(root, "Project.toml"))
   name = get(project, "name", nothing)
   uuid = get(project, "uuid", nothing)
-  name isa String && uuid isa String || error(
-    "$root/Project.toml must define string name and uuid fields"
-  )
+  name isa String && uuid isa String ||
+    error("$root/Project.toml must define string name and uuid fields")
   return (name=name, uuid=uuid)
 end
 
@@ -528,16 +506,7 @@ function write_coldstart_results(
   open(joinpath(output_dir, "builds.tsv"), "w") do io
     println(io, "variant\tbuild\tprecompile_ns\tcache_bytes")
     for row in report.builds
-      println(
-        io,
-        row.variant,
-        '\t',
-        row.build,
-        '\t',
-        row.precompile_ns,
-        '\t',
-        row.cache_bytes,
-      )
+      println(io, row.variant, '\t', row.build, '\t', row.precompile_ns, '\t', row.cache_bytes)
     end
   end
 
@@ -582,7 +551,7 @@ function write_coldstart_results(
     println(io, "samples=", report.config.samples)
     println(io, "absolute_ns=", report.config.absolute_ns)
     println(io, "relative=", report.config.relative)
-    println(io, "precompile_tasks=", report.config.precompile_tasks)
+    return println(io, "precompile_tasks=", report.config.precompile_tasks)
   end
   return String(output_dir)
 end
@@ -616,9 +585,8 @@ function coldstart_compare(
 
   base_identity = _project_identity(base)
   head_identity = _project_identity(head)
-  base_identity == head_identity || error(
-    "cold-start checkouts name different packages: $base_identity != $head_identity"
-  )
+  base_identity == head_identity ||
+    error("cold-start checkouts name different packages: $base_identity != $head_identity")
   package = head_identity.name
 
   config_dir = isabspath(ratchet_dir) ? String(ratchet_dir) : joinpath(head, ratchet_dir)
@@ -653,9 +621,8 @@ function coldstart_compare(
 
     # Equal discarded work before either side is measured. This absorbs the
     # one-time filesystem/LLVM effects of generating this package's cache.
-    for (variant, checkout, environment) in (
-      ("base", base, base_environment), ("head", head, head_environment)
-    )
+    for (variant, checkout, environment) in
+        (("base", base, base_environment), ("head", head, head_environment))
       warmup_depot = joinpath(temporary, "warmup-" * variant)
       _precompile_environment(
         checkout, environment, warmup_depot, seed_depot, package, config

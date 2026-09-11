@@ -1100,6 +1100,7 @@ reason = "Test code."
     @test_throws ErrorException read_rulings(mktempdir())
   end
 
+  include("finding_identity.jl")
   include("style_metric.jl")
   include("docs_metric.jl")
   include("boxes_metric.jl")

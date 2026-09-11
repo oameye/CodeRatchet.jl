@@ -131,6 +131,15 @@ function dispatch(args)
   return usage("unknown verb $(repr(verb))")
 end
 
+function check_summary(report::Report)
+  isempty(report.violations) && isempty(report.finding_violations) && return nothing
+  parts = String["### CodeRatchet $(report.metric)"]
+  isempty(report.violations) || push!(parts, rise_table(report.violations))
+  isempty(report.finding_violations) ||
+    push!(parts, finding_table(report.finding_violations))
+  return join(parts, "\n\n")
+end
+
 function do_check(metric::Metric, root::AbstractString, dir::AbstractString)
   report = check(metric, root; dir)
   print(report)
@@ -141,6 +150,9 @@ function do_check(metric::Metric, root::AbstractString, dir::AbstractString)
       v.path,
       "$(v.key) $(moved(v)) $(v.from) -> $(v.to); the ratchet holds it at $(v.from).",
     )
+  end
+  for v in report.finding_violations
+    annotate(v.path, "new finding $(repr(v.identity)); multiplicity $(v.from) -> $(v.to).")
   end
   for path in report.unparsable
     annotate(path, "does not parse, so its numbers are meaningless.")
@@ -154,9 +166,8 @@ function do_check(metric::Metric, root::AbstractString, dir::AbstractString)
     annotate(path, "has no baseline row. Refresh in the same change that added it.")
   end
 
-  if !isempty(report.violations)
-    step_summary("### CodeRatchet $(report.metric)\n\n" * rise_table(report.violations))
-  end
+  summary = check_summary(report)
+  summary === nothing || step_summary(summary)
   println()
   println(routes(; dismissal=dismissal_section(metric), moves=advised_move(metric)))
 
@@ -178,9 +189,8 @@ function do_refresh(metric::Metric, root::AbstractString, dir::AbstractString, a
   try
     report = refresh(metric, root; dir, accept_change=accept)
     println("wrote ", baseline_path(metric, dir))
-    accept &&
-      !isempty(report.violations) &&
-      println("  recorded ", length(report.violations), " change(s) deliberately")
+    n = length(report.violations) + length(report.finding_violations)
+    accept && n > 0 && println("  recorded ", n, " change(s) deliberately")
     return 0
   catch err
     println(stderr, sprint(showerror, err))

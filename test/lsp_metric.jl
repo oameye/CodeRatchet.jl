@@ -106,6 +106,24 @@ reason = "Export order groups by concept here, not alphabetically."
     end
   end
 
+  @testset "recording keeps reviewed findings in the row" begin
+    root = gitrepo(Dict("src/Pkg.jl" => "module Pkg end"); rulings=LSP_RULINGS)
+    rulings = read_rulings(joinpath(root, "code_ratchet"))
+    hint = Diagnostic(
+      "src/Pkg.jl", 24, "hint", "lowering/unsorted-import-names", "Names are not sorted"
+    )
+    unused = Diagnostic(
+      "src/inner.jl", 79, "info", "lowering/unused-argument", "Unused argument `operator`"
+    )
+    row = CodeRatchet.Row(Dict("raw" => 0, "reviewed" => 0))
+    CodeRatchet.record_diagnostic!(row, unused, rulings)
+    @test row.numbers == Dict("raw" => 1, "reviewed" => 1)
+    @test row.findings == [CodeRatchet.finding_identity(unused)]
+    CodeRatchet.record_diagnostic!(row, hint, rulings)
+    @test row.numbers == Dict("raw" => 2, "reviewed" => 1)
+    @test row.findings == [CodeRatchet.finding_identity(unused)]
+  end
+
   @testset "a dismissal narrows as more of it is named" begin
     make(body) = read_rulings(
       dirname(
@@ -194,10 +212,28 @@ reason = "Export order groups by concept here, not alphabetically."
     end
   end
 
+  @testset "finding identity excludes location and includes semantics" begin
+    a = Diagnostic("src/a.jl", 4, "info", "lowering/unused-argument", "Unused argument `x`")
+    moved = Diagnostic(
+      "src/a.jl", 400, "info", "lowering/unused-argument", "Unused argument `x`"
+    )
+    @test CodeRatchet.finding_identity(a) == CodeRatchet.finding_identity(moved)
+    @test CodeRatchet.finding_identity(a) !=
+      CodeRatchet.finding_identity(Diagnostic("src/a.jl", 4, "warn", a.code, a.message))
+    @test CodeRatchet.finding_identity(a) != CodeRatchet.finding_identity(
+      Diagnostic("src/a.jl", 4, a.severity, "other/code", a.message)
+    )
+    @test CodeRatchet.finding_identity(a) != CodeRatchet.finding_identity(
+      Diagnostic("src/a.jl", 4, a.severity, a.code, "Unused argument `y`")
+    )
+  end
+
   @testset "the metric's shape" begin
     @test metric_name(Lsp()) == "lsp"
     @test binding(Lsp()) == ("reviewed",)
     @test row_numbers(Lsp()) == ("raw", "reviewed")
     @test CodeRatchet.dismissal_section(Lsp()) == "lsp_dismissal"
+    @test CodeRatchet.finding_binding(Lsp()) == "reviewed"
+    @test CodeRatchet.metric_schema(Lsp()) == 2
   end
 end

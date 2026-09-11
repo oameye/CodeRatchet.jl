@@ -18,6 +18,8 @@ metric_name(::Lsp) = "lsp"
 binding(::Lsp) = ("reviewed",)
 row_numbers(::Lsp) = ("raw", "reviewed")
 dismissal_section(::Lsp) = "lsp_dismissal"
+metric_schema(::Lsp) = 2
+finding_binding(::Lsp) = "reviewed"
 
 """
     Diagnostic
@@ -30,6 +32,10 @@ struct Diagnostic
   severity::String
   code::String
   message::String
+end
+
+function finding_identity(diagnostic::Diagnostic)
+  return "[$(diagnostic.severity):$(diagnostic.code)] $(diagnostic.message)"
 end
 
 """
@@ -209,6 +215,15 @@ A nonzero exit is the normal case, not a failure: `jetls check` exits 1 whenever
 it finds anything at or above its exit severity, which is most runs on most
 repositories.
 """
+function record_diagnostic!(row::Row, diagnostic::Diagnostic, rulings::Rulings)
+  row.numbers["raw"] += 1
+  dismissed(diagnostic, rulings) && return nothing
+  row.numbers["reviewed"] += 1
+  push!(row.findings, finding_identity(diagnostic))
+  sort!(row.findings)
+  return nothing
+end
+
 function run_jetls(root::AbstractString, settings)
   jetls_version(settings.binary)
   flags = ["--context-lines=0", "--progress=none", "--show-severity=$(settings.severity)"]
@@ -234,9 +249,7 @@ function measure(::Lsp, root::AbstractString; dir::AbstractString=ratchet_dir(ro
   )
   for diagnostic in found
     haskey(rows, diagnostic.path) || continue
-    numbers = rows[diagnostic.path].numbers
-    numbers["raw"] += 1
-    dismissed(diagnostic, rulings) || (numbers["reviewed"] += 1)
+    record_diagnostic!(rows[diagnostic.path], diagnostic, rulings)
   end
   return rows
 end

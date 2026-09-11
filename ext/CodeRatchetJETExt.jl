@@ -31,6 +31,8 @@ CodeRatchet.metric_name(::Inference) = "jet"
 CodeRatchet.binding(::Inference) = ("reviewed",)
 CodeRatchet.dismissal_section(::Inference) = "dismissal"
 CodeRatchet.row_numbers(::Inference) = ("raw", "reviewed")
+CodeRatchet.metric_schema(::Inference) = 2
+CodeRatchet.finding_binding(::Inference) = "reviewed"
 
 """
     jet_settings(rulings) -> NamedTuple
@@ -111,9 +113,15 @@ A `[[dismissal]]` may name a `class` (the report type) and a `pattern` (a
 regex over the rendered message). Every field present must match, so a
 dismissal narrows rather than widens as you specify more of it.
 """
+jet_finding_identity(report) = sprint(show, report)
+
+function CodeRatchet.finding_identity(report::JET.JETInterface.InferenceErrorReport)
+  return jet_finding_identity(report)
+end
+
 function dismissed(report, rulings::Rulings)
   class = string(nameof(typeof(report)))
-  message = sprint(show, report)
+  message = jet_finding_identity(report)
   for ruling in get(rulings.raw, "dismissal", Dict[])
     haskey(ruling, "reason") || error("every [[dismissal]] needs a `reason`")
     if haskey(ruling, "class") && String(ruling["class"]) != class
@@ -131,6 +139,15 @@ function dismissed(report, rulings::Rulings)
     return true
   end
   return false
+end
+
+function record_report!(row::Row, report, rulings::Rulings)
+  row.numbers["raw"] += 1
+  dismissed(report, rulings) && return nothing
+  row.numbers["reviewed"] += 1
+  push!(row.findings, jet_finding_identity(report))
+  sort!(row.findings)
+  return nothing
 end
 
 function CodeRatchet.measure(
@@ -157,9 +174,7 @@ function CodeRatchet.measure(
   for report in reports
     rel = attribute(report, root)
     haskey(rows, rel) || continue
-    numbers = rows[rel].numbers
-    numbers["raw"] += 1
-    dismissed(report, rulings) || (numbers["reviewed"] += 1)
+    record_report!(rows[rel], report, rulings)
   end
   return rows
 end

@@ -105,6 +105,157 @@ reason = "Test code."
 """
 
 @testset "CodeRatchet" begin
+  @testset "semantic provenance is exact" begin
+    root = gitrepo(Dict("src/a.jl" => "f() = 1\n"); rulings=SRC_ONLY)
+    metric = Fake()
+    expected = CodeRatchet.measurement_provenance(metric, root)
+
+    @test expected["schema"] == 1
+    @test expected["binding"] == ["bind"]
+    @test expected["direction"] == ["down"]
+    @test expected["julia"] == string(VERSION.major, ".", VERSION.minor)
+    @test isempty(CodeRatchet.provenance_failures(metric, copy(expected), root))
+
+    for (key, value, needle) in (
+      ("schema", 2, "provenance moved"),
+      ("binding", ["other"], "provenance moved"),
+      ("direction", ["up"], "provenance moved"),
+    )
+      changed = copy(expected)
+      changed[key] = value
+      @test any(
+        msg -> occursin(needle, msg), CodeRatchet.provenance_failures(metric, changed, root)
+      )
+    end
+
+    missing = copy(expected)
+    delete!(missing, "schema")
+    @test any(
+      msg -> occursin("provenance missing", msg),
+      CodeRatchet.provenance_failures(metric, missing, root),
+    )
+
+    stale = copy(expected)
+    stale["old_schema"] = 1
+    @test any(
+      msg -> occursin("stale provenance", msg),
+      CodeRatchet.provenance_failures(metric, stale, root),
+    )
+
+    with_commit = copy(expected)
+    with_commit["commit"] = "an older source tree"
+    @test isempty(CodeRatchet.provenance_failures(metric, with_commit, root))
+
+    rendered = CodeRatchet.render_baseline(metric, Dict("src/a.jl" => fake(1, 2)), root)
+    @test occursin("schema = 1", rendered)
+    @test occursin("binding = [\"bind\"]", rendered)
+    @test occursin("direction = [\"down\"]", rendered)
+  end
+
+  @testset "provenance migration is deliberate" begin
+    root = gitrepo(Dict("src/a.jl" => "f() = 1\n"); rulings=SRC_ONLY)
+    metric = Complexity()
+    refresh(metric, root)
+    path = CodeRatchet.baseline_path(metric, joinpath(root, "code_ratchet"))
+    text = read(path, String)
+    write(path, replace(text, "schema = 1" => "schema = 999"))
+
+    @test_throws ErrorException refresh(metric, root)
+    refresh(metric, root; accept_change=true)
+    @test isempty(
+      CodeRatchet.provenance_failures(
+        metric, last(read_baseline(metric, joinpath(root, "code_ratchet"))), root
+      ),
+    )
+  end
+
+  @testset "an existing empty baseline still binds provenance" begin
+    root = gitrepo(Dict("test/t.jl" => "using Test\n"); rulings=SRC_ONLY)
+    metric = Complexity()
+    refresh(metric, root)
+    dir = joinpath(root, "code_ratchet")
+    path = CodeRatchet.baseline_path(metric, dir)
+    text = read(path, String)
+    write(path, replace(text, "schema = 1" => "schema = 999"))
+
+    report = check(metric, root; dir)
+    @test !report.bootstrap
+    @test !ok(report)
+    @test any(msg -> occursin("provenance moved", msg), report.rulings)
+    @test_throws ErrorException refresh(metric, root; dir)
+  end
+
+  @testset "measurement configuration is semantic provenance" begin
+    root = gitrepo(Dict("src/a.jl" => "f(x) = x > 0 ? 1 : 2\n"); rulings=SRC_ONLY)
+    metric = Complexity()
+    refresh(metric, root)
+    dir = joinpath(root, "code_ratchet")
+    path = joinpath(dir, CodeRatchet.baseline_stem(metric))
+    write(
+      joinpath(dir, CodeRatchet.RULINGS),
+      replace(SRC_ONLY, "cyclomatic = 3" => "cyclomatic = 4"),
+    )
+    report = check(metric, root; dir)
+    @test !ok(report)
+    @test any(msg -> occursin("thresholds", msg), report.rulings)
+  end
+
+  @testset "custom ratchet directories bind their own configuration" begin
+    root = gitrepo(Dict("src/a.jl" => "f(x) = x\n"); rulings=SRC_ONLY)
+    custom = joinpath(root, "quality")
+    mkpath(custom)
+    custom_rulings = replace(SRC_ONLY, "cyclomatic = 3" => "cyclomatic = 9")
+    write(joinpath(custom, CodeRatchet.RULINGS), custom_rulings)
+    metric = Complexity()
+    rows = measure(metric, root; dir=custom)
+    rendered = CodeRatchet.render_baseline(metric, rows, root; dir=custom)
+    @test occursin("cyclomatic=9", rendered)
+    @test !occursin("cyclomatic=3", rendered)
+
+    artifact = CodeRatchet.write_artifact(metric, root, custom)
+    artifact_text = read(artifact, String)
+    @test occursin("cyclomatic=9", artifact_text)
+    @test !occursin("cyclomatic=3", artifact_text)
+  end
+
+  @testset "coverage entry and ruling checks use the selected directory" begin
+    body = "f(x) = x + 1\n"
+    root = gitrepo(Dict("src/a.jl" => body); rulings=SRC_ONLY)
+    write(
+      joinpath(root, "lcov.info"),
+      "SF:$(joinpath(root, "src/a.jl"))\nDA:1,0\nend_of_record\n",
+    )
+    custom = joinpath(root, "quality")
+    mkpath(custom)
+    write(
+      joinpath(custom, CodeRatchet.RULINGS),
+      """
+      [scope]
+      measure = ["src/"]
+
+      [[exemption]]
+      path = "src/a.jl"
+      definition = "f"
+      misses = 1
+      reason = "fixture"
+      """,
+    )
+
+    rows = measure(Coverage(), root; dir=custom)
+    @test isempty(CodeRatchet.ruling_failures(Coverage(), root; dir=custom))
+    @test isempty(
+      CodeRatchet.entry_failures(Coverage(), root, ["src/a.jl"], rows; dir=custom)
+    )
+    @test !isempty(CodeRatchet.entry_failures(Coverage(), root, ["src/a.jl"], rows))
+  end
+
+  @testset "backend versions are semantic provenance" begin
+    root = gitrepo(Dict("src/a.jl" => "f() = 1\n"); rulings=SRC_ONLY)
+    provenance = CodeRatchet.provenance(Complexity(), root)
+    @test provenance["tool"] == "CodeComplexity"
+    @test !isempty(provenance["version"])
+  end
+
   @testset "the ratchet" begin
     base = Dict("a.jl" => fake(5, 50))
 

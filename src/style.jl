@@ -72,12 +72,15 @@ metric_name(::Style) = "style"
 binding(metric::Style) = Tuple(rule_name(r) for r in metric.rules)
 row_numbers(metric::Style) = binding(metric)
 
-function provenance(metric::Style, root::AbstractString)
-  return Dict{String,Any}(
-    "metric" => "style",
-    "rules" => sort([rule_name(r) for r in metric.rules]),
-    "commit" => short_commit(root),
-  )
+style_rule_identity(rule::NamedRule) = "named:" * rule.name
+style_rule_identity(rule::PatternRule) = "pattern:" * rule.name * ":" * repr(rule.pattern)
+
+function measurement_configuration(metric::Style, ::Rulings)
+  return Dict{String,Any}("rules" => sort([style_rule_identity(r) for r in metric.rules]))
+end
+
+function provenance(::Style, root::AbstractString)
+  return Dict{String,Any}("metric" => "style", "commit" => short_commit(root))
 end
 
 """

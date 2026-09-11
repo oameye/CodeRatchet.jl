@@ -8,7 +8,7 @@ reach today, which an absolute gate never is. "JET reports zero" cannot be
 switched on for a package with 200 reports. "No file gains a report" can be
 switched on this afternoon.
 
-Six metrics today, one comparison rule:
+Seven persistent metrics today, one comparison rule:
 
 | Metric | Binds on | Context it also records | Cost |
 | --- | --- | --- | --- |
@@ -128,7 +128,7 @@ job running 1.12.
 ```yaml
 jobs:
   ratchet:
-    uses: oameye/CodeRatchet.jl/.github/workflows/ratchet.yml@main
+    uses: oameye/CodeRatchet.jl/.github/workflows/ratchet.yml@<CODE_RATCHET_SHA>
     with:
       julia-version: '1.12'
       coverage: true                   # only if you run the coverage metric
@@ -138,7 +138,9 @@ jobs:
 ```
 
 Calling the workflow rather than copying it means the gate's CI behaviour has
-one definition. Forty copies drift; one call does not.
+one definition. Forty copies drift; one call does not. The workflow SHA and
+the `CodeRatchet` `rev` in `code_ratchet/Project.toml` must be the same exact
+commit; the reusable workflow verifies this before measuring anything.
 
 `coverage: true` runs the tests with coverage and builds the `lcov.info` the
 coverage metric reads, since that metric measures a tracefile rather than the
@@ -148,6 +150,74 @@ source and has nothing to read without one.
 Narrowing is a legitimate thing to want: a repository whose JET is already
 gated absolutely by another workflow should not pay for JET twice. Widening
 would be a second source of truth, so it is refused.
+
+### Cold-start regression tracking
+
+Cold-start is a separate paired experiment rather than a persistent metric.
+It compares exact base and head revisions on the same runner, with independent
+target-package cache builds and fresh Julia processes for each scenario sample.
+Only package precompile time and total time-to-first-execution gate; import,
+compilation/recompilation, warm latency and cache bytes remain diagnostic context.
+
+The **complete comparison protocol is frozen to the base revision**. If base
+already has a `[coldstart]` block, its scenario path, build/sample counts,
+materiality thresholds and precompile worker count judge both revisions. A head
+configuration is used only while bootstrapping a repository that had no
+cold-start configuration before the PR. The same rule applies to the relative
+scenario registry. Base and head must also discover the same ordered scenario
+names; otherwise there is no paired experiment to compare and the job fails.
+
+Put representative zero-argument workloads in
+`benchmark/precompile/scenarios.jl` as an ordered named tuple named
+`PRECOMPILE_BENCHMARKS`:
+
+```julia
+exercise_api() = check(MyPackage.answer() == 42, "unexpected answer")
+
+const PRECOMPILE_BENCHMARKS = (
+    exercise_api = exercise_api,
+)
+```
+
+```toml
+[coldstart]
+scenarios = "benchmark/precompile/scenarios.jl"
+builds = 2
+samples = 5
+absolute_ms = 50
+relative = 0.05
+precompile_tasks = 1
+```
+
+Each measured build explicitly precompiles the target package. Scenario
+processes then run with `--compiled-modules=existing --pkgimages=existing`, so
+that phase may consume the package caches just built but cannot silently create
+new ones. Runtime JIT work still contributes to first-use latency. The result
+artifact includes the exact base/head consumer Project and Manifest files,
+SHA-256 workload/config/environment identities, Julia runtime/system-image
+identity and both commit SHAs.
+
+Use the paired workflow separately from the persistent ratchet job and pin the
+CodeRatchet revision:
+
+```yaml
+jobs:
+  coldstart:
+    uses: oameye/CodeRatchet.jl/.github/workflows/coldstart.yml@<CODE_RATCHET_SHA>
+```
+
+The same experiment can be run locally against two checkouts:
+
+```sh
+julia --project=code_ratchet \
+  -e 'using Pkg, CodeRatchet; exit(CodeRatchet.coldstart_main())' \
+  compare --base /path/to/base --head /path/to/head \
+  --output coldstart-results
+```
+
+Timing is intentionally not written into the normal CodeRatchet baseline:
+runner noise is handled by same-run base/head comparison, alternating build
+order, repeated fresh processes and explicit materiality floors instead.
 
 ### By hand
 
@@ -164,7 +234,7 @@ YourPackage = "..."                 # only the JET metric needs this
 JET = "c3a54625-cd67-489e-a8e7-0a5a0ff4e31b"
 
 [sources]
-CodeRatchet = {url = "https://github.com/oameye/CodeRatchet.jl", rev = "main"}
+CodeRatchet = {url = "https://github.com/oameye/CodeRatchet.jl", rev = "<CODE_RATCHET_SHA>"}
 YourPackage = {path = ".."}
 ```
 

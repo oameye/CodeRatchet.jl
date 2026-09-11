@@ -4,10 +4,26 @@
 
 [provenance]
 aggregation = "max_and_count_over_threshold"
-commit = "9da4a1e"
-metric = "complexity"
-tool = "CodeComplexity"
 binding = ["cyc", "cog", "arg", "cyc_over", "cog_over", "arg_over"]
+commit = "6495466"
+direction = ["down", "down", "down", "down", "down", "down"]
+julia = "1.13"
+metric = "complexity"
+schema = 1
+thresholds = ["argcount=6", "cognitive=15", "cyclomatic=10"]
+tool = "CodeComplexity"
+version = "0.2.0"
+
+[files."ext/CodeRatchetColdStartExt.jl"]
+cyc = 0
+cog = 0
+arg = 0
+cyc_over = 0
+cog_over = 0
+arg_over = 0
+cyc_sum = 0
+cog_sum = 0
+arg_sum = 0
 
 [files."ext/CodeRatchetJETExt.jl"]
 cyc = 9
@@ -16,9 +32,9 @@ arg = 3
 cyc_over = 0
 cog_over = 0
 arg_over = 0
-cyc_sum = 28
+cyc_sum = 29
 cog_sum = 22
-arg_sum = 14
+arg_sum = 16
 
 [files."src/CodeRatchet.jl"]
 cyc = 8
@@ -27,9 +43,9 @@ arg = 5
 cyc_over = 0
 cog_over = 0
 arg_over = 0
-cyc_sum = 107
-cog_sum = 71
-arg_sum = 87
+cyc_sum = 124
+cog_sum = 82
+arg_sum = 107
 
 [files."src/all.jl"]
 cyc = 6
@@ -49,9 +65,9 @@ arg = 3
 cyc_over = 0
 cog_over = 0
 arg_over = 0
-cyc_sum = 44
+cyc_sum = 45
 cog_sum = 33
-arg_sum = 16
+arg_sum = 18
 
 [files."src/cli.jl"]
 cyc = 12
@@ -62,7 +78,29 @@ cog_over = 0
 arg_over = 0
 cyc_sum = 81
 cog_sum = 70
-arg_sum = 35
+arg_sum = 36
+
+[files."src/coldstart.jl"]
+cyc = 6
+cog = 10
+arg = 6
+cyc_over = 0
+cog_over = 0
+arg_over = 0
+cyc_sum = 128
+cog_sum = 99
+arg_sum = 128
+
+[files."src/coldstart_cli.jl"]
+cyc = 8
+cog = 8
+arg = 3
+cyc_over = 0
+cog_over = 0
+arg_over = 0
+cyc_sum = 22
+cog_sum = 18
+arg_sum = 10
 
 [files."src/complexity.jl"]
 cyc = 5
@@ -71,9 +109,9 @@ arg = 3
 cyc_over = 0
 cog_over = 0
 arg_over = 0
-cyc_sum = 10
+cyc_sum = 11
 cog_sum = 11
-arg_sum = 10
+arg_sum = 12
 
 [files."src/coverage.jl"]
 cyc = 14
@@ -84,7 +122,7 @@ cog_over = 1
 arg_over = 0
 cyc_sum = 79
 cog_sum = 79
-arg_sum = 36
+arg_sum = 37
 
 [files."src/docs.jl"]
 cyc = 13
@@ -104,9 +142,9 @@ arg = 3
 cyc_over = 0
 cog_over = 0
 arg_over = 0
-cyc_sum = 27
-cog_sum = 24
-arg_sum = 10
+cyc_sum = 49
+cog_sum = 42
+arg_sum = 15
 
 [files."src/lsp.jl"]
 cyc = 10
@@ -115,9 +153,9 @@ arg = 3
 cyc_over = 0
 cog_over = 0
 arg_over = 0
-cyc_sum = 39
+cyc_sum = 40
 cog_sum = 26
-arg_sum = 21
+arg_sum = 23
 
 [files."src/style.jl"]
 cyc = 12
@@ -126,9 +164,9 @@ arg = 3
 cyc_over = 2
 cog_over = 1
 arg_over = 0
-cyc_sum = 78
+cyc_sum = 81
 cog_sum = 69
-arg_sum = 35
+arg_sum = 39
 
 [files."src/triage.jl"]
 cyc = 10

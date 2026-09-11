@@ -165,6 +165,27 @@ reason = "Export order groups by concept here, not alphabetically."
       @test settings.severity == "hint"
     end
 
+    @testset "measurement configuration is semantic provenance" begin
+      rulings_text = """
+      [scope]
+      measure = ["src/"]
+
+      [lsp]
+      entry = ["src/z.jl", "src/a.jl"]
+      binary = "echo"
+      severity = "warning"
+      skip_full_analysis = true
+      """
+      root = gitrepo(Dict("src/a.jl" => "f(x) = x"); rulings=rulings_text)
+      dir = joinpath(root, "code_ratchet")
+      p = CodeRatchet.measurement_provenance(Lsp(), root; dir)
+      @test p["tool"] == "jetls"
+      @test p["version"] == "version"
+      @test p["severity"] == "warning"
+      @test p["full_analysis"] == false
+      @test p["entry"] == ["src/a.jl", "src/z.jl"]
+    end
+
     @testset "a missing entry list is refused" begin
       root = gitrepo(
         Dict("src/a.jl" => "f(x) = x"); rulings="[scope]\nmeasure = [\"src/\"]\n"

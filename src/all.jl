@@ -61,7 +61,7 @@ function configured_metrics(
   # was reassigned above: capturing a reassigned binding boxes it. Found by
   # this package's own Boxes metric, run on this package.
   selected = names
-  return Metric[metric_from(n, root) for n in METRIC_ORDER if n in selected]
+  return Metric[metric_from(n, root; dir) for n in METRIC_ORDER if n in selected]
 end
 
 """

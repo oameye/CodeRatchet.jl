@@ -97,15 +97,16 @@ boxes_of(f) = sum(method_boxes, methods(f); init=0)
       Dict("src/a.jl" => "f(x) = x");
       rulings="[scope]\nmeasure = [\"src/\"]\n\n[boxes]\npackage = \"Base\"\n",
     )
-    p = CodeRatchet.provenance(Boxes(), root)
+    p = CodeRatchet.measurement_provenance(Boxes(), root)
     @test p["julia"] == string(VERSION.major, ".", VERSION.minor)
     @test p["package"] == "Base"
+    @test p["load_set"] == String[]
   end
 
   @testset "a missing [boxes] block is refused" begin
     root = gitrepo(
       Dict("src/a.jl" => "f(x) = x"); rulings="[scope]\nmeasure = [\"src/\"]\n"
     )
-    @test_throws ErrorException CodeRatchet.provenance(Boxes(), root)
+    @test_throws ErrorException CodeRatchet.measurement_provenance(Boxes(), root)
   end
 end

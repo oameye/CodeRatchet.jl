@@ -141,9 +141,9 @@ end
   # syntax error would read as every rule suddenly being satisfied.
   @testset "an unparsable file measures zero, and fails the gate separately" begin
     root = gitrepo(Dict("src/broken.jl" => "function oops(\n"); rulings=STYLE_RULINGS)
-    # Meta.parseall does not throw here: it returns a tree carrying a parse-
-    # failure node (:error or :incomplete depending on Julia), which holds
-    # nothing any rule counts.
+    # Meta.parseall does not throw here: it returns a tree carrying a parser
+    # failure node. Julia 1.13 uses Expr(:incomplete, ...), while earlier
+    # releases commonly used Expr(:error, ...).
     tree = parse_file(root, "src/broken.jl")
     @test tree.head === :toplevel
     @test any(a -> a isa Expr && a.head in (:error, :incomplete), tree.args)
@@ -232,9 +232,17 @@ end
         Set(["union_nothing", "underscore_name", "implicit_kwarg"])
     end
 
-    @testset "provenance pins the rule set" begin
-      p = CodeRatchet.provenance(metric, root)
-      @test p["rules"] == ["implicit_kwarg", "underscore_name", "union_nothing"]
+    @testset "provenance pins the full rule definitions" begin
+      p = CodeRatchet.measurement_provenance(metric, root)
+      @test p["rules"] ==
+        ["named:implicit_kwarg", "named:underscore_name", "named:union_nothing"]
+
+      mixed = Style([
+        NamedRule("union_nothing"),
+        PatternRule("noisy", r"println", "leftover debug output"),
+      ])
+      mixed_p = CodeRatchet.measurement_provenance(mixed, root)
+      @test mixed_p["rules"] == ["named:union_nothing", "pattern:noisy:r\"println\""]
     end
 
     @testset "style offers no dismissal route" begin

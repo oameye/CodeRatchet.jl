@@ -63,6 +63,28 @@ rules = ["union_nothing"]
     @test [metric_name(m) for m in configured_metrics(root; only=["style", "docs"])] == ["style", "docs"]
   end
 
+  @testset "metric construction uses the selected ratchet directory" begin
+    root = gitrepo(Dict("src/a.jl" => "f(x) = x\n"); rulings=THREE)
+    custom = joinpath(root, "quality")
+    mkpath(custom)
+    write(
+      joinpath(custom, CodeRatchet.RULINGS),
+      """
+      [metrics]
+      run = ["style"]
+
+      [scope]
+      measure = ["src/"]
+
+      [style]
+      rules = ["underscore_name"]
+      """,
+    )
+    metrics = configured_metrics(root; dir=custom)
+    @test length(metrics) == 1
+    @test CodeRatchet.binding(only(metrics)) == ("underscore_name",)
+  end
+
   @testset "--only cannot add a metric the repository did not configure" begin
     root = gitrepo(Dict("src/a.jl" => "f(x) = x"); rulings=THREE)
     @test_throws ErrorException configured_metrics(root; only=["jet"])
@@ -160,6 +182,12 @@ end
     @test identity.name == ""
   end
 
+  @testset "malformed package metadata is treated as no package" begin
+    root = mktempdir()
+    write(joinpath(root, "Project.toml"), "[")
+    @test package_identity(root) == (name="", uuid="")
+  end
+
   # The generated config is complete on the first run. A hand-written one
   # almost always misses a directory, and the gate's first output is then a
   # list of orphaned files rather than a green tick.
@@ -202,6 +230,88 @@ end
   # Found by running init on CodeRatchet's own repository: the package under
   # measurement being the tool itself emitted the dependency twice, and the
   # result was TOML that does not parse.
+  @testset "generated projects pin the exact CodeRatchet revision" begin
+    pin = "a"^40
+    withenv("CODERATCHET_REV" => pin) do
+      project = CodeRatchet.ratchet_project((name="Demo", uuid="aaaa-bbbb"))
+      @test occursin("rev = \"$pin\"", project)
+    end
+    withenv("CODERATCHET_REV" => "main") do
+      @test_throws ErrorException CodeRatchet.coderatchet_revision()
+    end
+    @test CodeRatchet.exact_git_revision(uppercase(pin)) == pin
+    @test CodeRatchet.exact_git_revision("b"^64) == "b"^64
+    @test_throws ErrorException CodeRatchet.exact_git_revision("deadbeef")
+  end
+
+  @testset "manifest revision resolution is immutable and version-aware" begin
+    root = mktempdir()
+    project = joinpath(root, "Project.toml")
+    write(project, "name = \"Fixture\"\n")
+    generic = "b"^40
+    versioned = "c"^40
+    write(
+      joinpath(root, "Manifest.toml"), "[[deps.CodeRatchet]]\nrepo-rev = \"$generic\"\n"
+    )
+    versioned_manifest = joinpath(root, "Manifest-v$(VERSION.major).$(VERSION.minor).toml")
+    write(versioned_manifest, "[[deps.CodeRatchet]]\nrepo-rev = \"$versioned\"\n")
+
+    @test CodeRatchet.manifest_coderatchet_revision(project) == versioned
+    withenv("CODERATCHET_REV" => "d"^40) do
+      @test CodeRatchet.installed_coderatchet_revision(project) == versioned
+    end
+
+    rm(versioned_manifest)
+    @test CodeRatchet.manifest_coderatchet_revision(project) == generic
+
+    write(joinpath(root, "Manifest.toml"), "[[deps.CodeRatchet]]\nrepo-rev = \"main\"\n")
+    @test_throws ErrorException CodeRatchet.installed_coderatchet_revision(project)
+  end
+
+  @testset "manifest revision resolution refuses ambiguous metadata" begin
+    root = mktempdir()
+    project = joinpath(root, "Project.toml")
+    manifest = joinpath(root, "Manifest.toml")
+    write(project, "name = \"Fixture\"\n")
+
+    @test CodeRatchet.manifest_coderatchet_revision(nothing) == ""
+    @test CodeRatchet.manifest_coderatchet_revision(project) == ""
+
+    write(manifest, "[deps]\nOther = []\n")
+    @test CodeRatchet.manifest_coderatchet_revision(project) == ""
+
+    first = "a"^40
+    second = "b"^40
+    write(
+      manifest,
+      "[[deps.CodeRatchet]]\nrepo-rev = \"$first\"\n" *
+      "[[deps.CodeRatchet]]\nrepo-rev = \"$second\"\n",
+    )
+    @test CodeRatchet.manifest_coderatchet_revision(project) == ""
+
+    write(manifest, "[deps]\nCodeRatchet = [\"not-a-table\"]\n")
+    @test CodeRatchet.manifest_coderatchet_revision(project) == ""
+  end
+
+  @testset "installed revision refuses an unidentified checkout" begin
+    root = mktempdir()
+    project = joinpath(root, "Project.toml")
+    write(project, "name = \"Fixture\"\n")
+    withenv("PATH" => "") do
+      @test CodeRatchet.checkout_coderatchet_revision() == ""
+      @test_throws ErrorException CodeRatchet.installed_coderatchet_revision(project)
+    end
+  end
+
+  @testset "the reusable workflow binds its implementation revision" begin
+    workflow = read(
+      normpath(joinpath(@__DIR__, "..", ".github", "workflows", "ratchet.yml")), String
+    )
+    @test occursin("job.workflow_sha", workflow)
+    @test occursin("installed_coderatchet_revision()", workflow)
+    @test !occursin("ratchet.yml@main", workflow)
+  end
+
   @testset "the generated Project.toml parses" begin
     for name in ("Demo", "CodeRatchet")
       root = gitrepo(
@@ -235,3 +345,5 @@ end
     @test occursin("Replace this reason", unmeasured_reason("weird/"))
   end
 end
+
+include("coldstart_metric.jl")

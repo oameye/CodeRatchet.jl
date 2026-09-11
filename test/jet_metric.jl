@@ -162,9 +162,10 @@ end
       load = ["B", "A"]
       """,
     )
-    prov = CodeRatchet.provenance(EXT.Inference(), repo)
+    prov = CodeRatchet.measurement_provenance(EXT.Inference(), repo)
     @test prov["package"] == "Thing"
     @test prov["load_set"] == ["A", "B"]   # sorted, so the order cannot drift
+    @test prov["target_modules"] == ["Thing"]
     @test haskey(prov, "commit")
   end
 

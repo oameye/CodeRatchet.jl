@@ -4,17 +4,24 @@
 
 [provenance]
 attribution = "top_level_definition_ranges"
-commit = "9da4a1e"
-metric = "coverage"
-source = "lcov"
 binding = ["misses"]
+commit = "6495466"
+direction = ["down"]
+julia = "1.13"
+metric = "coverage"
+schema = 1
+source = "lcov"
+
+[files."ext/CodeRatchetColdStartExt.jl"]
+lines = 0
+misses = 0
 
 [files."ext/CodeRatchetJETExt.jl"]
-lines = 56
+lines = 58
 misses = 20
 
 [files."src/CodeRatchet.jl"]
-lines = 231
+lines = 274
 misses = 11
 
 [files."src/all.jl"]
@@ -22,15 +29,23 @@ lines = 45
 misses = 0
 
 [files."src/boxes.jl"]
-lines = 78
+lines = 79
 misses = 39
 
 [files."src/cli.jl"]
 lines = 184
 misses = 118
 
+[files."src/coldstart.jl"]
+lines = 358
+misses = 0
+
+[files."src/coldstart_cli.jl"]
+lines = 44
+misses = 0
+
 [files."src/complexity.jl"]
-lines = 22
+lines = 26
 misses = 0
 
 [files."src/coverage.jl"]
@@ -42,15 +57,15 @@ lines = 75
 misses = 4
 
 [files."src/init.jl"]
-lines = 102
-misses = 1
+lines = 145
+misses = 0
 
 [files."src/lsp.jl"]
-lines = 82
-misses = 39
+lines = 83
+misses = 27
 
 [files."src/style.jl"]
-lines = 126
+lines = 129
 misses = 2
 
 [files."src/triage.jl"]

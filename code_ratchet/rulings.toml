@@ -21,9 +21,25 @@ argcount = 6
 [style]
 rules = ["union_nothing", "underscore_name", "implicit_kwarg"]
 
+[coldstart]
+scenarios = "benchmark/precompile/scenarios.jl"
+builds = 2
+samples = 3
+absolute_ms = 50
+relative = 0.05
+precompile_tasks = 1
+
 [[unmeasured_path]]
 path = "test/"
 reason = "Test code. It has its own standards."
+
+[[unmeasured_path]]
+path = "benchmark/"
+reason = "Benchmark harness, not library code."
+
+[[unmeasured_path]]
+path = "contrib/"
+reason = "Standalone tooling scripts, tested through the library surface."
 
 [boxes]
 package = "CodeRatchet"

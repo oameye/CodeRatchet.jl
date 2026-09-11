@@ -17,9 +17,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 1.12 is the floor, not a preference. Boxes needs Base.visit, the
-        # `public` keyword the Docstrings metric reads is 1.11, and 1.12 is
-        # where lowering stopped boxing a capture reassigned before capture.
+        # Keep the package compatible with its existing 1.12 floor while
+        # exercising 1.13 explicitly. Compiler-facing reusable workflows use
+        # 1.13 as their reference runtime below.
         julia: ['1.12', '1.13']
         os: [ubuntu-latest]
     steps:
@@ -48,12 +48,20 @@ jobs:
     needs: test
     uses: ./.github/workflows/ratchet.yml
     with:
-      julia-version: '1.12'
+      julia-version: '1.13'
       coverage: true
       install-jetls: true
       # The revision the lsp baseline was taken under. `release` moves, and an
       # unpinned tool reddens the gate for a change nobody made.
       jetls-rev: '6893fcef26708d64360c048e039102c76ad032c0'
+
+  # Timing cannot share the ordinary ratchet job: it needs both exact PR
+  # revisions on one runner and multiple independent fresh-process samples.
+  # Running this package through its own workflow keeps that protocol tested.
+  coldstart:
+    name: Cold-start self-check
+    if: github.event_name == 'pull_request'
+    uses: ./.github/workflows/coldstart.yml
 
   format:
     name: Format
@@ -70,4 +78,5 @@ jobs:
       - run: julia -e 'using Pkg; Pkg.add(name="JuliaFormatter", version="2")'
       - name: Check formatting
         run: |
-          julia -e 'using JuliaFormatter; exit(format(".", overwrite=false) ? 0 : 1)'
+          julia -e 'using JuliaFormatter; format(".")'
+          git diff --exit-code

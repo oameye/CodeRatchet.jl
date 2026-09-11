@@ -60,16 +60,19 @@ function lsp_settings(rulings::Rulings)
   )
 end
 
-function provenance(::Lsp, root::AbstractString)
-  settings = lsp_settings(read_rulings(ratchet_dir(root)))
+function measurement_configuration(::Lsp, rulings::Rulings)
+  settings = lsp_settings(rulings)
   return Dict{String,Any}(
-    "metric" => "lsp",
-    "tool" => "jetls",
     "version" => jetls_version(settings.binary),
     "severity" => settings.severity,
     "full_analysis" => !settings.skip_full_analysis,
     "entry" => sort(settings.entry),
-    "commit" => short_commit(root),
+  )
+end
+
+function provenance(::Lsp, root::AbstractString)
+  return Dict{String,Any}(
+    "metric" => "lsp", "tool" => "jetls", "commit" => short_commit(root)
   )
 end
 

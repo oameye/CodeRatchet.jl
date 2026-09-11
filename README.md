@@ -128,7 +128,7 @@ job running 1.12.
 ```yaml
 jobs:
   ratchet:
-    uses: oameye/CodeRatchet.jl/.github/workflows/ratchet.yml@main
+    uses: oameye/CodeRatchet.jl/.github/workflows/ratchet.yml@<CODE_RATCHET_SHA>
     with:
       julia-version: '1.12'
       coverage: true                   # only if you run the coverage metric
@@ -138,7 +138,9 @@ jobs:
 ```
 
 Calling the workflow rather than copying it means the gate's CI behaviour has
-one definition. Forty copies drift; one call does not.
+one definition. Forty copies drift; one call does not. The workflow SHA and
+the `CodeRatchet` `rev` in `code_ratchet/Project.toml` must be the same exact
+commit; the reusable workflow verifies this before measuring anything.
 
 `coverage: true` runs the tests with coverage and builds the `lcov.info` the
 coverage metric reads, since that metric measures a tracefile rather than the
@@ -232,7 +234,7 @@ YourPackage = "..."                 # only the JET metric needs this
 JET = "c3a54625-cd67-489e-a8e7-0a5a0ff4e31b"
 
 [sources]
-CodeRatchet = {url = "https://github.com/oameye/CodeRatchet.jl", rev = "main"}
+CodeRatchet = {url = "https://github.com/oameye/CodeRatchet.jl", rev = "<CODE_RATCHET_SHA>"}
 YourPackage = {path = ".."}
 ```
 

@@ -1,3 +1,4 @@
+using CodeComplexity: CodeComplexity
 using CodeComplexity:
   ArgumentCountComplexity, CognitiveComplexity, CyclomaticComplexity, measure_file
 
@@ -57,10 +58,18 @@ const COMPLEXITY_THRESHOLDS = Dict(
   "cyc" => "cyclomatic", "cog" => "cognitive", "arg" => "argcount"
 )
 
+function measurement_configuration(::Complexity, rulings::Rulings)
+  thresholds = sort!([
+    "$name=$(get(rulings.thresholds, name, 0))" for name in values(COMPLEXITY_THRESHOLDS)
+  ])
+  return Dict{String,Any}("thresholds" => thresholds)
+end
+
 function provenance(::Complexity, root::AbstractString)
   return Dict{String,Any}(
     "metric" => "complexity",
     "tool" => "CodeComplexity",
+    "version" => string(Base.pkgversion(CodeComplexity)),
     # Changed when the count of definitions above threshold was added. An older
     # baseline carries the previous value and fails provenance, which says what
     # happened; without the change it would instead produce a wall of

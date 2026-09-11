@@ -56,13 +56,21 @@ function jet_settings(rulings::Rulings)
   )
 end
 
-function CodeRatchet.provenance(::Inference, root::AbstractString)
-  settings = jet_settings(read_rulings(ratchet_dir(root)))
+function CodeRatchet.measurement_configuration(::Inference, rulings::Rulings)
+  settings = jet_settings(rulings)
   return Dict{String,Any}(
-    "metric" => "jet",
-    "attribution" => "deepest_repository_frame",
     "package" => settings.package,
     "load_set" => sort(settings.load),
+    "target_modules" => sort(settings.targets),
+  )
+end
+
+function CodeRatchet.provenance(::Inference, root::AbstractString)
+  return Dict{String,Any}(
+    "metric" => "jet",
+    "tool" => "JET",
+    "version" => string(Base.pkgversion(JET)),
+    "attribution" => "deepest_repository_frame",
     "commit" => CodeRatchet.short_commit(root),
   )
 end

@@ -280,8 +280,8 @@ its reason. A claim below it is the leak a file total cannot see, because a
 line covered elsewhere in the file pays for a new uncovered line inside the
 exempted definition and the ratchet reads a flat number. Equality closes both.
 """
-function ruling_failures(::Coverage, root::AbstractString)
-  rulings = read_rulings(ratchet_dir(root))
+function ruling_failures(::Coverage, root::AbstractString, dir::AbstractString)
+  rulings = read_rulings(dir)
   ruled = exemptions(rulings)
   isempty(ruled) && return String[]
   measured = parse_lcov(lcov_path(root), root)
@@ -317,9 +317,9 @@ A file entering with no baseline row enters fully covered or fully exempted.
 Coverage is the one metric with a meaningful, reachable zero, so a new file has
 no excuse to arrive with unexplained misses.
 """
-function entry_failures(::Coverage, root::AbstractString, paths, ::Any)
+function entry_failures(::Coverage, root::AbstractString, paths, context::EntryContext)
   isempty(paths) && return String[]
-  rulings = read_rulings(ratchet_dir(root))
+  rulings = read_rulings(context.dir)
   ruled = exemptions(rulings)
   measured = parse_lcov(lcov_path(root), root)
   bad = String[]

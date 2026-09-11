@@ -114,7 +114,7 @@ end
 function dispatch(args)
   root = get(ENV, "CODERATCHET_ROOT", pwd())
   dir = ratchet_dir(root)
-  metric = metric_from(args[1], root)
+  metric = metric_from(args[1], root; dir)
   metric === nothing && return usage("unknown metric $(repr(args[1]))")
   verb, flags = args[2], args[3:end]
 
@@ -264,13 +264,15 @@ function do_undocumented(metric::Metric, root::AbstractString, dir::AbstractStri
   return 0
 end
 
-function metric_from(name::AbstractString, root::AbstractString)
+function metric_from(
+  name::AbstractString, root::AbstractString; dir::AbstractString=ratchet_dir(root)
+)
   return if name == "complexity"
     Complexity()
   elseif name == "coverage"
     Coverage()
   elseif name == "style"
-    Style(root)
+    Style(root; dir)
   elseif name == "docs"
     Docstrings()
   elseif name == "boxes"

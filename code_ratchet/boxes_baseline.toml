@@ -4,11 +4,14 @@
 
 [provenance]
 attribution = "method_definition_file"
-commit = "a539df0"
+binding = ["boxes"]
+commit = "6495466"
+direction = ["down"]
 julia = "1.13"
+load_set = []
 metric = "boxes"
 package = "CodeRatchet"
-binding = ["boxes"]
+schema = 1
 
 [files."ext/CodeRatchetColdStartExt.jl"]
 boxes = 0

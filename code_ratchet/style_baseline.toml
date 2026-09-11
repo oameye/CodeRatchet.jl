@@ -3,10 +3,13 @@
 # judgements live in rulings.toml beside it.
 
 [provenance]
-commit = "a539df0"
-metric = "style"
-rules = ["implicit_kwarg", "underscore_name", "union_nothing"]
 binding = ["union_nothing", "underscore_name", "implicit_kwarg"]
+commit = "6495466"
+direction = ["down", "down", "down"]
+julia = "1.13"
+metric = "style"
+rules = ["named:implicit_kwarg", "named:underscore_name", "named:union_nothing"]
+schema = 1
 
 [files."ext/CodeRatchetColdStartExt.jl"]
 union_nothing = 0

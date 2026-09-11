@@ -4,11 +4,17 @@
 
 [provenance]
 attribution = "deepest_repository_frame"
-commit = "a539df0"
+binding = ["reviewed"]
+commit = "6495466"
+direction = ["down"]
+julia = "1.13"
 load_set = ["JET"]
 metric = "jet"
 package = "CodeRatchet"
-binding = ["reviewed"]
+schema = 1
+target_modules = ["CodeRatchet"]
+tool = "JET"
+version = "0.12.1"
 
 [files."ext/CodeRatchetColdStartExt.jl"]
 raw = 0

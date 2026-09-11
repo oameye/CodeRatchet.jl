@@ -232,9 +232,17 @@ end
         Set(["union_nothing", "underscore_name", "implicit_kwarg"])
     end
 
-    @testset "provenance pins the rule set" begin
-      p = CodeRatchet.provenance(metric, root)
-      @test p["rules"] == ["implicit_kwarg", "underscore_name", "union_nothing"]
+    @testset "provenance pins the full rule definitions" begin
+      p = CodeRatchet.measurement_provenance(metric, root)
+      @test p["rules"] ==
+        ["named:implicit_kwarg", "named:underscore_name", "named:union_nothing"]
+
+      mixed = Style([
+        NamedRule("union_nothing"),
+        PatternRule("noisy", r"println", "leftover debug output"),
+      ])
+      mixed_p = CodeRatchet.measurement_provenance(mixed, root)
+      @test mixed_p["rules"] == ["named:union_nothing", "pattern:noisy:r\"println\""]
     end
 
     @testset "style offers no dismissal route" begin

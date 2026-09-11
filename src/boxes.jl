@@ -48,12 +48,15 @@ comparable to a run on another, and comparing them silently would hand back
 either a phantom improvement or a red gate nobody can act on. Failing on the
 mismatch says what actually happened and asks for a refresh.
 """
+function measurement_configuration(::Boxes, rulings::Rulings)
+  settings = boxes_settings(rulings)
+  return Dict{String,Any}("package" => settings.package, "load_set" => sort(settings.load))
+end
+
 function provenance(::Boxes, root::AbstractString)
-  settings = boxes_settings(read_rulings(ratchet_dir(root)))
   return Dict{String,Any}(
     "metric" => "boxes",
     "attribution" => "method_definition_file",
-    "package" => settings.package,
     "julia" => string(VERSION.major, ".", VERSION.minor),
     "commit" => short_commit(root),
   )

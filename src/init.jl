@@ -71,6 +71,99 @@ function unmeasured_reason(path::AbstractString)
 end
 
 """
+    exact_git_revision(revision) -> String
+
+Normalize an immutable Git revision. Moving branches and abbreviated SHAs are
+refused because they do not identify the tool that produced a baseline.
+"""
+function exact_git_revision(revision::AbstractString)
+  value = strip(String(revision))
+  valid = match(r"^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$", value) !== nothing
+  valid || error(
+    "CodeRatchet revision must be an exact 40- or 64-hex commit SHA, got $(repr(value))."
+  )
+  return lowercase(value)
+end
+
+function coderatchet_manifest_path(project)
+  project === nothing && return ""
+  dir = dirname(String(project))
+  versioned = joinpath(dir, "Manifest-v$(VERSION.major).$(VERSION.minor).toml")
+  isfile(versioned) && return versioned
+  plain = joinpath(dir, "Manifest.toml")
+  return isfile(plain) ? plain : ""
+end
+
+function coderatchet_manifest_entry(entries)
+  entries isa AbstractVector || return nothing
+  length(entries) == 1 || return nothing
+  entry = only(entries)
+  return entry isa AbstractDict ? entry : nothing
+end
+
+function manifest_coderatchet_revision(project=Base.active_project())
+  manifest = coderatchet_manifest_path(project)
+  isempty(manifest) && return ""
+  raw = TOML.parsefile(manifest)
+  deps = get(raw, "deps", Dict{String,Any}())
+  entry = coderatchet_manifest_entry(get(deps, "CodeRatchet", nothing))
+  entry === nothing && return ""
+  revision = get(entry, "repo-rev", "")
+  return revision isa AbstractString ? String(revision) : ""
+end
+
+function checkout_coderatchet_revision()
+  source = pathof(CodeRatchet)
+  source === nothing && return ""
+  root = dirname(dirname(source))
+  try
+    return strip(
+      read(pipeline(Cmd(`git rev-parse HEAD`; dir=root); stderr=devnull), String)
+    )
+  catch
+    return ""
+  end
+end
+
+"""
+    installed_coderatchet_revision(project=Base.active_project()) -> String
+
+The immutable revision of the CodeRatchet code actually installed in the
+active environment. Unlike `coderatchet_revision`, this deliberately ignores
+`CODERATCHET_REV`: CI uses it to prove that a caller cannot claim a workflow
+revision different from the code Pkg actually instantiated.
+"""
+function installed_coderatchet_revision(project=Base.active_project())
+  declared = manifest_coderatchet_revision(project)
+  isempty(declared) || return exact_git_revision(declared)
+
+  checkout = checkout_coderatchet_revision()
+  isempty(checkout) || return exact_git_revision(checkout)
+
+  return error(
+    "cannot determine the installed CodeRatchet revision; the ratchet environment " *
+    "must install CodeRatchet from an exact commit or a git checkout.",
+  )
+end
+
+"""
+    coderatchet_revision() -> String
+
+The exact commit used when generating a consumer environment.
+`CODERATCHET_REV` is an explicit override only for source archives that cannot
+identify their checkout themselves. Otherwise the actually installed revision
+is used. The reusable workflow never trusts this override: it compares its own
+`job.workflow_sha` against `installed_coderatchet_revision`. Moving revisions
+are rejected rather than resolved silently.
+"""
+function coderatchet_revision()
+  configured = get(ENV, "CODERATCHET_REV", "")
+  isempty(configured) || return exact_git_revision(configured)
+
+  return installed_coderatchet_revision()
+end
+
+"""
     ratchet_project(identity) -> String
 
 The `code_ratchet/Project.toml`, an environment of its own.
@@ -106,9 +199,12 @@ function ratchet_project(identity)
   if itself
     println(io, "CodeRatchet = {path = \"..\"}")
   else
+    revision = coderatchet_revision()
     println(
       io,
-      "CodeRatchet = {url = \"https://github.com/oameye/CodeRatchet.jl\", rev = \"main\"}",
+      "CodeRatchet = {url = \"https://github.com/oameye/CodeRatchet.jl\", rev = \"",
+      revision,
+      "\"}",
     )
     isempty(identity.name) || println(io, identity.name, " = {path = \"..\"}")
   end

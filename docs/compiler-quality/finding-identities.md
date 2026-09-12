@@ -51,9 +51,10 @@ report semantics therefore requires an explicit provenance migration rather
 than silently changing finding identity.
 
 Dismissals remain possible, but they must be semantically narrow. Every JET
-`[[dismissal]]` requires a non-empty message `pattern` and a reason; `class` is
-optional and only narrows that match. Class-only dismissals are refused because
-they would create an open-ended hole for every future report of that class.
+`[[dismissal]]` and JETLS `[[lsp_dismissal]]` requires a non-empty message
+`pattern` and a reason. JET `class`, and JETLS `code`/`severity`, are optional
+narrowing fields; they cannot stand alone. This prevents a category-level rule
+from becoming an open-ended hole for unrelated future findings.
 
 ## Baseline format
 
@@ -109,5 +110,8 @@ The tranche is complete when tests prove that:
   and includes report class plus rendered semantic report content;
 - identical JET report payloads in distinct methods remain distinct findings;
 - class-only JET dismissals are rejected;
+- code- or severity-only JETLS dismissals are rejected;
+- invalid dismissal configuration is rejected even when the measured backend
+  reports no findings;
 - count-only JET/JETLS baselines are provenance-incompatible and require an
   explicit migration.

@@ -41,6 +41,9 @@ function rulings_with(body::AbstractString)
   return read_rulings(dir)
 end
 
+jet_identity_fixture(x::String) = x + 1
+jet_identity_fixture_other(x::String) = x + 1
+
 @testset "JET adapter" begin
   root = mktempdir()
   mkpath(joinpath(root, "src"))
@@ -87,14 +90,16 @@ end
     @test EXT.attribute(report, root) == ""
   end
 
-  @testset "dismissal by class" begin
+  @testset "class-only dismissal is refused" begin
     rulings = rulings_with("""
     [[dismissal]]
     class = "MethodErrorReport"
-    reason = "fixture"
+    reason = "too broad"
     """)
-    @test EXT.dismissed(MethodErrorReport(StubFrame[], "anything"), rulings)
-    @test !EXT.dismissed(UncaughtExceptionReport(StubFrame[], "anything"), rulings)
+    @test_throws ErrorException EXT.dismissed(
+      MethodErrorReport(StubFrame[], "anything"), rulings
+    )
+    @test_throws ErrorException EXT.validate_dismissals(rulings)
   end
 
   @testset "dismissal by pattern" begin
@@ -125,13 +130,23 @@ end
     rulings = rulings_with("""
     [[dismissal]]
     class = "MethodErrorReport"
+    pattern = "x"
     """)
     @test_throws ErrorException EXT.dismissed(MethodErrorReport(StubFrame[], "x"), rulings)
   end
 
-  @testset "a dismissal matching everything is refused" begin
+  @testset "a dismissal without a semantic pattern is refused" begin
     rulings = rulings_with("""
     [[dismissal]]
+    reason = "would dismiss every report"
+    """)
+    @test_throws ErrorException EXT.dismissed(MethodErrorReport(StubFrame[], "x"), rulings)
+  end
+
+  @testset "an empty dismissal pattern is refused" begin
+    rulings = rulings_with("""
+    [[dismissal]]
+    pattern = ""
     reason = "would dismiss every report"
     """)
     @test_throws ErrorException EXT.dismissed(MethodErrorReport(StubFrame[], "x"), rulings)
@@ -169,13 +184,52 @@ end
     @test haskey(prov, "commit")
   end
 
+  @testset "finding identity excludes virtual stack locations" begin
+    a = MethodErrorReport([StubFrame(Symbol("src/a.jl"), 1)], "same semantic report")
+    moved = MethodErrorReport([StubFrame(Symbol("src/a.jl"), 99)], "same semantic report")
+    other = MethodErrorReport([StubFrame(Symbol("src/a.jl"), 1)], "different report")
+    @test EXT.jet_finding_identity(a) == EXT.jet_finding_identity(moved)
+    @test EXT.jet_finding_identity(a) != EXT.jet_finding_identity(other)
+  end
+
+  @testset "real JET identity includes the enclosing method owner" begin
+    reports = JET.get_reports(JET.report_call(jet_identity_fixture, (String,)))
+    other_reports = JET.get_reports(JET.report_call(jet_identity_fixture_other, (String,)))
+    @test !isempty(reports)
+    @test !isempty(other_reports)
+    report = first(reports)
+    other = first(other_reports)
+    @test EXT.jet_owner_identity(report) != EXT.jet_owner_identity(other)
+    @test EXT.jet_finding_identity(report) != EXT.jet_finding_identity(other)
+    @test CodeRatchet.finding_identity(report) == EXT.jet_finding_identity(report)
+  end
+
+  @testset "recording keeps reviewed findings in the row" begin
+    row = CodeRatchet.Row(Dict("raw" => 0, "reviewed" => 0))
+    report = MethodErrorReport(StubFrame[], "standing")
+    EXT.record_report!(row, report, rulings_with(""))
+    @test row.numbers == Dict("raw" => 1, "reviewed" => 1)
+    @test row.findings == [EXT.jet_finding_identity(report)]
+
+    dismissed_rulings = rulings_with("""
+    [[dismissal]]
+    class = "MethodErrorReport"
+    pattern = "dismissed"
+    reason = "fixture"
+    """)
+    EXT.record_report!(row, MethodErrorReport(StubFrame[], "dismissed"), dismissed_rulings)
+    @test row.numbers == Dict("raw" => 2, "reviewed" => 1)
+    @test row.findings == [EXT.jet_finding_identity(report)]
+  end
+
   @testset "the metric's shape" begin
     metric = EXT.Inference()
     @test CodeRatchet.metric_name(metric) == "jet"
     @test CodeRatchet.binding(metric) == ("reviewed",)
     @test "raw" in CodeRatchet.row_numbers(metric)
-    # raw is recorded but does not bind: a new instance of a dismissed class
-    # must stay green, which is the whole reason for the split.
+    # raw is context only; reviewed identities bind after narrow dismissals.
     @test !("raw" in CodeRatchet.binding(metric))
+    @test CodeRatchet.finding_binding(metric) == "reviewed"
+    @test CodeRatchet.metric_schema(metric) == 2
   end
 end

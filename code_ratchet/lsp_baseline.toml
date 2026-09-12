@@ -4,13 +4,13 @@
 
 [provenance]
 binding = ["reviewed"]
-commit = "6495466"
+commit = "4cbd298"
 direction = ["down"]
 entry = ["src/CodeRatchet.jl"]
 full_analysis = true
 julia = "1.13"
 metric = "lsp"
-schema = 1
+schema = 2
 severity = "hint"
 tool = "jetls"
 version = "jetls version 2026-08-23, julia version 1.13.0"
@@ -18,59 +18,74 @@ version = "jetls version 2026-08-23, julia version 1.13.0"
 [files."ext/CodeRatchetColdStartExt.jl"]
 raw = 0
 reviewed = 0
+findings = []
 
 [files."ext/CodeRatchetJETExt.jl"]
 raw = 0
 reviewed = 0
+findings = []
 
 [files."src/CodeRatchet.jl"]
 raw = 0
 reviewed = 0
+findings = []
 
 [files."src/all.jl"]
 raw = 0
 reviewed = 0
+findings = []
 
 [files."src/boxes.jl"]
 raw = 0
 reviewed = 0
+findings = []
 
 [files."src/cli.jl"]
 raw = 0
 reviewed = 0
+findings = []
 
 [files."src/coldstart.jl"]
 raw = 0
 reviewed = 0
+findings = []
 
 [files."src/coldstart_cli.jl"]
 raw = 0
 reviewed = 0
+findings = []
 
 [files."src/complexity.jl"]
 raw = 0
 reviewed = 0
+findings = []
 
 [files."src/coverage.jl"]
 raw = 0
 reviewed = 0
+findings = []
 
 [files."src/docs.jl"]
 raw = 0
 reviewed = 0
+findings = []
 
 [files."src/init.jl"]
 raw = 0
 reviewed = 0
+findings = []
 
 [files."src/lsp.jl"]
 raw = 0
 reviewed = 0
+findings = []
 
 [files."src/style.jl"]
 raw = 0
 reviewed = 0
+findings = []
 
 [files."src/triage.jl"]
 raw = 0
 reviewed = 0
+findings = []

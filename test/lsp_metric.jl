@@ -32,6 +32,7 @@ entry = ["src/Pkg.jl"]
 
 [[lsp_dismissal]]
 code = "lowering/unsorted-import-names"
+pattern = "Names are not sorted"
 reason = "Export order groups by concept here, not alphabetically."
 """
 
@@ -97,13 +98,31 @@ reason = "Export order groups by concept here, not alphabetically."
       "src/inner.jl", 79, "info", "lowering/unused-argument", "Unused argument `operator`"
     )
 
-    @testset "a dismissal matching the code holds" begin
+    @testset "a semantic dismissal matching code and message holds" begin
       @test dismissed(hint, rulings)
     end
 
     @testset "an undismissed diagnostic stands" begin
       @test !dismissed(unused, rulings)
     end
+  end
+
+  @testset "recording keeps reviewed findings in the row" begin
+    root = gitrepo(Dict("src/Pkg.jl" => "module Pkg end"); rulings=LSP_RULINGS)
+    rulings = read_rulings(joinpath(root, "code_ratchet"))
+    hint = Diagnostic(
+      "src/Pkg.jl", 24, "hint", "lowering/unsorted-import-names", "Names are not sorted"
+    )
+    unused = Diagnostic(
+      "src/inner.jl", 79, "info", "lowering/unused-argument", "Unused argument `operator`"
+    )
+    row = CodeRatchet.Row(Dict("raw" => 0, "reviewed" => 0))
+    CodeRatchet.record_diagnostic!(row, unused, rulings)
+    @test row.numbers == Dict("raw" => 1, "reviewed" => 1)
+    @test row.findings == [CodeRatchet.finding_identity(unused)]
+    CodeRatchet.record_diagnostic!(row, hint, rulings)
+    @test row.numbers == Dict("raw" => 2, "reviewed" => 1)
+    @test row.findings == [CodeRatchet.finding_identity(unused)]
   end
 
   @testset "a dismissal narrows as more of it is named" begin
@@ -121,7 +140,13 @@ reason = "Export order groups by concept here, not alphabetically."
     code_only = make(
       base * "\n[[lsp_dismissal]]\ncode = \"lowering/unused-argument\"\nreason = \"r\"\n"
     )
-    @test dismissed(d, code_only)
+    @test_throws ErrorException dismissed(d, code_only)
+    @test_throws ErrorException CodeRatchet.validate_lsp_dismissals(code_only)
+
+    pattern_only = make(
+      base * "\n[[lsp_dismissal]]\npattern = \"Unused argument\"\nreason = \"r\"\n"
+    )
+    @test dismissed(d, pattern_only)
 
     # Adding a field that does not match must NARROW the dismissal, never widen
     # it. A dismissal that grew as it was specified would be a trap.
@@ -135,12 +160,12 @@ reason = "Export order groups by concept here, not alphabetically."
     wrong_severity = make(
       base *
       "\n[[lsp_dismissal]]\ncode = \"lowering/unused-argument\"\n" *
-      "severity = \"error\"\nreason = \"r\"\n",
+      "severity = \"error\"\npattern = \"Unused argument\"\nreason = \"r\"\n",
     )
     @test !dismissed(d, wrong_severity)
   end
 
-  @testset "a dismissal naming nothing would dismiss everything, so it is refused" begin
+  @testset "a dismissal without a semantic pattern is refused" begin
     rulings = read_rulings(
       dirname(
         (
@@ -154,6 +179,22 @@ reason = "Export order groups by concept here, not alphabetically."
     )
     d = Diagnostic("src/a.jl", 1, "info", "c", "m")
     @test_throws ErrorException dismissed(d, rulings)
+  end
+
+  @testset "an empty dismissal pattern is refused" begin
+    root = gitrepo(Dict("src/a.jl" => "f(x) = x"); rulings="""
+                                                   [scope]
+                                                   measure = ["src/"]
+
+                                                   [lsp]
+                                                   entry = ["src/a.jl"]
+
+                                                   [[lsp_dismissal]]
+                                                   pattern = ""
+                                                   reason = "r"
+                                                   """)
+    rulings = read_rulings(joinpath(root, "code_ratchet"))
+    @test_throws ErrorException CodeRatchet.validate_lsp_dismissals(rulings)
   end
 
   @testset "settings" begin
@@ -194,10 +235,28 @@ reason = "Export order groups by concept here, not alphabetically."
     end
   end
 
+  @testset "finding identity excludes location and includes semantics" begin
+    a = Diagnostic("src/a.jl", 4, "info", "lowering/unused-argument", "Unused argument `x`")
+    moved = Diagnostic(
+      "src/a.jl", 400, "info", "lowering/unused-argument", "Unused argument `x`"
+    )
+    @test CodeRatchet.finding_identity(a) == CodeRatchet.finding_identity(moved)
+    @test CodeRatchet.finding_identity(a) !=
+      CodeRatchet.finding_identity(Diagnostic("src/a.jl", 4, "warn", a.code, a.message))
+    @test CodeRatchet.finding_identity(a) != CodeRatchet.finding_identity(
+      Diagnostic("src/a.jl", 4, a.severity, "other/code", a.message)
+    )
+    @test CodeRatchet.finding_identity(a) != CodeRatchet.finding_identity(
+      Diagnostic("src/a.jl", 4, a.severity, a.code, "Unused argument `y`")
+    )
+  end
+
   @testset "the metric's shape" begin
     @test metric_name(Lsp()) == "lsp"
     @test binding(Lsp()) == ("reviewed",)
     @test row_numbers(Lsp()) == ("raw", "reviewed")
     @test CodeRatchet.dismissal_section(Lsp()) == "lsp_dismissal"
+    @test CodeRatchet.finding_binding(Lsp()) == "reviewed"
+    @test CodeRatchet.metric_schema(Lsp()) == 2
   end
 end

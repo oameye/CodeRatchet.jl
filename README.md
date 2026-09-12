@@ -17,8 +17,8 @@ Seven persistent metrics today, one comparison rule:
 | `Style()` | one count per configured house rule | nothing; every rule binds | ~1 s |
 | `Docstrings()` | a file's **undocumented public name** count | how many public names it defines | ~1 s |
 | `Boxes()` | a file's **`Core.Box`** count | nothing; the count is the whole finding | seconds |
-| `Lsp()` | a file's **reviewed** JETLS diagnostic count | the raw count | ~30 s |
-| `Inference()` | a file's **reviewed** JET report count | the raw count | minutes |
+| `Lsp()` | the **reviewed JETLS finding multiset and count** | the raw count | ~30 s |
+| `Inference()` | the **reviewed JET finding multiset and count** | the raw count | minutes |
 
 Ordered by cost, and a repository should run them in that order: a gate that
 takes a second and catches the common mistake should fail before one that takes
@@ -52,10 +52,12 @@ improve its percentage while gaining misses. The miss count is the number that
 goes to zero, and it moves the right way on its own: adding a covered function
 raises `lines` and leaves `misses` alone.
 
-**JET binds on the reviewed count, not the raw one.** A dismissal covers a
-*class* of report, so the fifteenth instance of an already-dismissed class must
-stay green. Binding on the raw count would turn every new instance of a known
-non-defect red.
+**JET binds on reviewed finding identities, not raw reports.** The raw count is
+context; the reviewed count and its per-file semantic finding multiset bind.
+That means resolving one old report cannot pay for an unrelated new one at the
+same aggregate count. Dismissals require a semantic message pattern, optionally
+narrowed by report class, so a category-level exception cannot become an
+open-ended hole for future reports.
 
 **Style binds a preference, which is what a ratchet is for.** A house rule is
 not a defect, so an absolute gate on one is unadoptable the day it is written:
@@ -80,7 +82,9 @@ The two overlap almost nowhere. `Lsp()` also defaults `skip_full_analysis` to
 false, against the habit the flag invites: skipping the full analysis leaves
 JETLS without the module a file belongs to, so its imports read as unused and
 its macros read as undefined. Measured on a nine-file package, the flag turned
-seven real diagnostics into fourteen mostly false ones.
+seven real diagnostics into fourteen mostly false ones. Like JET, JETLS binds
+semantic finding identities as well as the reviewed count, and its dismissals
+require a message pattern; diagnostic code and severity can only narrow it.
 
 **Docstring coverage binds on undocumented names, not on a ratio.** A ratio
 rises when a public name is deleted, and a documented count rises when a
@@ -288,6 +292,7 @@ entry = ["src/YourPackage.jl"]       # what `jetls check` is pointed at
 
 [[lsp_dismissal]]                    # lsp only
 code = "lowering/unsorted-import-names"
+pattern = "Names are not sorted"
 reason = "Exports are grouped by concept here, not alphabetically."
 ```
 
@@ -396,6 +401,9 @@ file has a cyclomatic maximum, so a total over maxima means nothing. See
 A rise in a binding number is the obvious one. These are the rest, and each
 closes a way the gate could otherwise be quietly wrong.
 
+- **A new semantic finding or a higher multiplicity of an existing finding.**
+  Finding-aware metrics compare the reviewed multiset as well as its count, so
+  one resolved finding cannot cancel an unrelated new one.
 - **A file in scope with no baseline row.** Without this a new file passes at
   any number at all until some later refresh bakes it in silently. Demanding
   the row puts the number in the diff of the change that introduced it.
@@ -420,7 +428,8 @@ A failing check does three things beyond exiting 1.
 
 - One `::error file=…::` annotation per offending file, so the failure lands on
   the diff rather than only in a log.
-- A markdown rise table appended to `$GITHUB_STEP_SUMMARY`.
+- A markdown numeric-rise and/or new-finding table appended to
+  `$GITHUB_STEP_SUMMARY`.
 - A **refresh artifact**: the baseline as `refresh --accept-change` would have
   written it, under `<ratchet dir>/_refresh/`. Upload it from the failing run,
   and a contributor fixes a red gate by downloading the file and committing it
@@ -468,11 +477,12 @@ number binding `:up` is a violation when it falls.
 
 ## Renames
 
-A file that vanishes and one that appears carrying an identical **full** number
-set are paired, and the baseline carries over. Pairing uses every recorded
-number rather than the binding subset, because two unrelated files often share
-a worst definition and pairing those would carry the wrong history forward. An
-ambiguous pairing is refused rather than guessed.
+A file that vanishes and one that appears carrying identical **full row state**
+are paired, and the baseline carries over. Pairing uses every recorded number
+and, for finding-aware metrics, the complete finding multiset. Two unrelated
+files often share a worst definition or an aggregate count; pairing only on the
+binding subset would carry the wrong history forward. An ambiguous pairing is
+refused rather than guessed.
 
 ## Adding a metric
 
@@ -488,6 +498,11 @@ CodeRatchet.row_numbers(::MyMetric) = ("thing", "context")
 CodeRatchet.measure(::MyMetric, root) = Dict("src/a.jl" => CodeRatchet.Row(...))
 CodeRatchet.provenance(::MyMetric, root) = Dict("metric" => "mymetric")
 ```
+
+A finding-producing metric additionally defines `finding_binding(metric)` and a
+stable `finding_identity(finding)` representation; the bound count must equal
+the per-row finding multiplicity. Source locations should remain presentation
+context unless they are genuinely part of the semantic defect.
 
 Override `strict_new(::MyMetric) = true` when a file absent from the baseline
 must enter clean. `Coverage` does; `Complexity` does not, because it has no

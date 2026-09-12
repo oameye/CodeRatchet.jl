@@ -1,7 +1,8 @@
 """
     Lsp()
 
-JETLS diagnostics per file, ratcheted on the **reviewed** count.
+JETLS diagnostics per file, ratcheted on the **reviewed** count and reviewed
+finding identities.
 
 JETLS reports what JET does not. JET analyses inference; JETLS analyses
 lowering, and finds undefined globals, unused imports and arguments, dead
@@ -18,6 +19,8 @@ metric_name(::Lsp) = "lsp"
 binding(::Lsp) = ("reviewed",)
 row_numbers(::Lsp) = ("raw", "reviewed")
 dismissal_section(::Lsp) = "lsp_dismissal"
+metric_schema(::Lsp) = 2
+finding_binding(::Lsp) = "reviewed"
 
 """
     Diagnostic
@@ -30,6 +33,10 @@ struct Diagnostic
   severity::String
   code::String
   message::String
+end
+
+function finding_identity(diagnostic::Diagnostic)
+  return "[$(diagnostic.severity):$(diagnostic.code)] $(diagnostic.message)"
 end
 
 """
@@ -172,29 +179,42 @@ function parse_diagnostics(text::AbstractString, root::AbstractString)
   return found, claimed
 end
 
+function validate_lsp_dismissal(ruling)
+  haskey(ruling, "reason") || error("every [[lsp_dismissal]] needs a `reason`")
+  haskey(ruling, "pattern") || error(
+    "every [[lsp_dismissal]] needs a non-empty `pattern`; code- or severity-only " *
+    "dismissals are open-ended",
+  )
+  pattern = String(ruling["pattern"])
+  isempty(pattern) && error("every [[lsp_dismissal]] needs a non-empty `pattern`")
+  return pattern
+end
+
+function validate_lsp_dismissals(rulings::Rulings)
+  for ruling in get(rulings.raw, "lsp_dismissal", Dict[])
+    validate_lsp_dismissal(ruling)
+  end
+  return nothing
+end
+
 """
     dismissed(diagnostic, rulings) -> Bool
 
 Whether a human has ruled this diagnostic a non-defect.
 
-A `[[lsp_dismissal]]` may name a `code`, a `severity` and a `pattern` over the
-message. Every field present must match, so naming more of them narrows the
-dismissal rather than widening it.
+Every `[[lsp_dismissal]]` needs a non-empty `pattern` over the message and a
+`reason`. `code` and `severity` are optional and only narrow that semantic
+match. Code- or severity-only dismissals are refused because they would hide
+all future diagnostics of that category.
 """
 function dismissed(diagnostic::Diagnostic, rulings::Rulings)
   for ruling in get(rulings.raw, "lsp_dismissal", Dict[])
-    haskey(ruling, "reason") || error("every [[lsp_dismissal]] needs a `reason`")
-    any(k -> haskey(ruling, k), ("code", "severity", "pattern"))::Bool || error(
-      "an [[lsp_dismissal]] with no `code`, `severity` or `pattern` would dismiss " *
-      "every diagnostic; name at least one",
-    )
+    pattern = validate_lsp_dismissal(ruling)
     haskey(ruling, "code") && String(ruling["code"]) != diagnostic.code && continue
     haskey(ruling, "severity") &&
       String(ruling["severity"]) != diagnostic.severity &&
       continue
-    haskey(ruling, "pattern") &&
-      !occursin(Regex(String(ruling["pattern"])), diagnostic.message) &&
-      continue
+    occursin(Regex(pattern), diagnostic.message) || continue
     return true
   end
   return false
@@ -209,6 +229,15 @@ A nonzero exit is the normal case, not a failure: `jetls check` exits 1 whenever
 it finds anything at or above its exit severity, which is most runs on most
 repositories.
 """
+function record_diagnostic!(row::Row, diagnostic::Diagnostic, rulings::Rulings)
+  row.numbers["raw"] += 1
+  dismissed(diagnostic, rulings) && return nothing
+  row.numbers["reviewed"] += 1
+  push!(row.findings, finding_identity(diagnostic))
+  sort!(row.findings)
+  return nothing
+end
+
 function run_jetls(root::AbstractString, settings)
   jetls_version(settings.binary)
   flags = ["--context-lines=0", "--progress=none", "--show-severity=$(settings.severity)"]
@@ -220,6 +249,7 @@ end
 function measure(::Lsp, root::AbstractString; dir::AbstractString=ratchet_dir(root))
   rulings = read_rulings(dir)
   settings = lsp_settings(rulings)
+  validate_lsp_dismissals(rulings)
   found, claimed = parse_diagnostics(run_jetls(root, settings), root)
   claimed >= 0 &&
     length(found) != claimed &&
@@ -234,9 +264,7 @@ function measure(::Lsp, root::AbstractString; dir::AbstractString=ratchet_dir(ro
   )
   for diagnostic in found
     haskey(rows, diagnostic.path) || continue
-    numbers = rows[diagnostic.path].numbers
-    numbers["raw"] += 1
-    dismissed(diagnostic, rulings) || (numbers["reviewed"] += 1)
+    record_diagnostic!(rows[diagnostic.path], diagnostic, rulings)
   end
   return rows
 end
@@ -248,6 +276,7 @@ Every undismissed diagnostic, one line each, for a person about to fix them.
 """
 function lsp_report(root::AbstractString=pwd(); dir::AbstractString=ratchet_dir(root))
   rulings = read_rulings(dir)
+  validate_lsp_dismissals(rulings)
   found, _ = parse_diagnostics(run_jetls(root, lsp_settings(rulings)), root)
   keep = [d for d in found if !dismissed(d, rulings)]
   sort!(keep; by=d -> (d.path, d.line))

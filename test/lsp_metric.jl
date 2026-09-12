@@ -182,20 +182,17 @@ reason = "Export order groups by concept here, not alphabetically."
   end
 
   @testset "an empty dismissal pattern is refused" begin
-    root = gitrepo(
-      Dict("src/a.jl" => "f(x) = x");
-      rulings="""
-      [scope]
-      measure = ["src/"]
+    root = gitrepo(Dict("src/a.jl" => "f(x) = x"); rulings="""
+                                                   [scope]
+                                                   measure = ["src/"]
 
-      [lsp]
-      entry = ["src/a.jl"]
+                                                   [lsp]
+                                                   entry = ["src/a.jl"]
 
-      [[lsp_dismissal]]
-      pattern = ""
-      reason = "r"
-      """,
-    )
+                                                   [[lsp_dismissal]]
+                                                   pattern = ""
+                                                   reason = "r"
+                                                   """)
     rulings = read_rulings(joinpath(root, "code_ratchet"))
     @test_throws ErrorException CodeRatchet.validate_lsp_dismissals(rulings)
   end

@@ -148,7 +148,7 @@ end
 function validate_dismissal(ruling)
   haskey(ruling, "reason") || error("every [[dismissal]] needs a `reason`")
   haskey(ruling, "pattern") || error(
-    "every [[dismissal]] needs a non-empty `pattern`; class-only dismissals are open-ended"
+    "every [[dismissal]] needs a non-empty `pattern`; class-only dismissals are open-ended",
   )
   pattern = String(ruling["pattern"])
   isempty(pattern) && error("every [[dismissal]] needs a non-empty `pattern`")

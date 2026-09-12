@@ -38,13 +38,22 @@ JETLS identity is the parsed severity, diagnostic code, and message:
 [<severity>:<code>] <message>
 ```
 
-JET identity is the location-free report rendering: report class plus JET's
-report message/signature. JET's virtual stack trace is used only to attribute
-the report to a repository file and is excluded from the identity.
+JET identity combines a location-free enclosing MethodInstance owner with JET's
+location-free report rendering (report class, semantic message, and expression
+signature). This prevents identical-looking reports in two different methods
+from cancelling by multiplicity while still excluding file paths and line
+numbers from the identity.
 
-Backend versions already bind in measurement provenance. A JET/JETLS release
-that changes diagnostic wording or report semantics therefore requires an
-explicit provenance migration rather than silently changing finding identity.
+JET's virtual stack trace is used to determine ownership and attribution, but
+source locations from that stack never bind. Backend versions already bind in
+measurement provenance. A JET/JETLS release that changes diagnostic wording or
+report semantics therefore requires an explicit provenance migration rather
+than silently changing finding identity.
+
+Dismissals remain possible, but they must be semantically narrow. Every JET
+`[[dismissal]]` requires a non-empty message `pattern` and a reason; `class` is
+optional and only narrows that match. Class-only dismissals are refused because
+they would create an open-ended hole for every future report of that class.
 
 ## Baseline format
 
@@ -96,7 +105,9 @@ The tranche is complete when tests prove that:
 - a new file with reviewed findings fails entry validation;
 - plain refresh refuses a finding regression;
 - JETLS identity excludes line/column but includes severity, code, and message;
-- JET identity excludes virtual stack locations but includes report class and
-  rendered semantic report content;
+- JET identity excludes source locations, includes the enclosing method owner,
+  and includes report class plus rendered semantic report content;
+- identical JET report payloads in distinct methods remain distinct findings;
+- class-only JET dismissals are rejected;
 - count-only JET/JETLS baselines are provenance-incompatible and require an
   explicit migration.

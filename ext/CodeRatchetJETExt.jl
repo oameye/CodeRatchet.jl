@@ -77,6 +77,16 @@ function CodeRatchet.provenance(::Inference, root::AbstractString)
   )
 end
 
+function repository_frame_path(frame, root::AbstractString)
+  file = String(frame.file)
+  (isempty(file) || file == "top-level") && return ""
+  path = isabspath(file) ? file : joinpath(root, file)
+  isfile(path) || return ""
+  rel = replace(relpath(path, root), '\\' => '/')
+  startswith(rel, "..") && return ""
+  return rel
+end
+
 """
     attribute(report, root) -> String
 
@@ -93,13 +103,8 @@ entry point happened to reach it.
 """
 function attribute(report, root::AbstractString)
   for frame in Iterators.reverse(report.vst)
-    file = String(frame.file)
-    (isempty(file) || file == "top-level") && continue
-    path = isabspath(file) ? file : joinpath(root, file)
-    isfile(path) || continue
-    rel = replace(relpath(path, root), '\\' => '/')
-    startswith(rel, "..") && continue
-    return rel
+    rel = repository_frame_path(frame, root)
+    isempty(rel) || return rel
   end
   return ""
 end
@@ -116,13 +121,45 @@ function jet_owner_identity(report::JET.JETInterface.InferenceErrorReport)
   return sprint(JET.show_mi, report.vst[end].linfo)
 end
 
+function jet_owner_identity(
+  report::JET.JETInterface.InferenceErrorReport, root::AbstractString
+)
+  for frame in Iterators.reverse(report.vst)
+    isempty(repository_frame_path(frame, root)) && continue
+    return sprint(JET.show_mi, frame.linfo)
+  end
+  return jet_owner_identity(report)
+end
+
 jet_finding_identity(report) = sprint(show, report)
 function jet_finding_identity(report::JET.JETInterface.InferenceErrorReport)
   return jet_owner_identity(report) * " :: " * sprint(show, report)
 end
+function jet_finding_identity(
+  report::JET.JETInterface.InferenceErrorReport, root::AbstractString
+)
+  return jet_owner_identity(report, root) * " :: " * sprint(show, report)
+end
 
 function CodeRatchet.finding_identity(report::JET.JETInterface.InferenceErrorReport)
   return jet_finding_identity(report)
+end
+
+function validate_dismissal(ruling)
+  haskey(ruling, "reason") || error("every [[dismissal]] needs a `reason`")
+  haskey(ruling, "pattern") || error(
+    "every [[dismissal]] needs a non-empty `pattern`; class-only dismissals are open-ended"
+  )
+  pattern = String(ruling["pattern"])
+  isempty(pattern) && error("every [[dismissal]] needs a non-empty `pattern`")
+  return pattern
+end
+
+function validate_dismissals(rulings::Rulings)
+  for ruling in get(rulings.raw, "dismissal", Dict[])
+    validate_dismissal(ruling)
+  end
+  return nothing
 end
 
 """
@@ -136,29 +173,31 @@ class-only dismissal is refused because it would silently suppress every future
 report of that JET class.
 """
 function dismissed(report, rulings::Rulings)
+  return dismissed(report, rulings, jet_finding_identity(report))
+end
+
+function dismissed(report, rulings::Rulings, identity::AbstractString)
   class = string(nameof(typeof(report)))
-  message = jet_finding_identity(report)
   for ruling in get(rulings.raw, "dismissal", Dict[])
-    haskey(ruling, "reason") || error("every [[dismissal]] needs a `reason`")
-    haskey(ruling, "pattern") || error(
-      "every [[dismissal]] needs a non-empty `pattern`; class-only dismissals are open-ended"
-    )
-    pattern = String(ruling["pattern"])
-    isempty(pattern) && error("every [[dismissal]] needs a non-empty `pattern`")
+    pattern = validate_dismissal(ruling)
     if haskey(ruling, "class") && String(ruling["class"]) != class
       continue
     end
-    occursin(Regex(pattern), message) || continue
+    occursin(Regex(pattern), identity) || continue
     return true
   end
   return false
 end
 
 function record_report!(row::Row, report, rulings::Rulings)
+  return record_report!(row, report, rulings, jet_finding_identity(report))
+end
+
+function record_report!(row::Row, report, rulings::Rulings, identity::AbstractString)
   row.numbers["raw"] += 1
-  dismissed(report, rulings) && return nothing
+  dismissed(report, rulings, identity) && return nothing
   row.numbers["reviewed"] += 1
-  push!(row.findings, jet_finding_identity(report))
+  push!(row.findings, String(identity))
   sort!(row.findings)
   return nothing
 end
@@ -168,6 +207,7 @@ function CodeRatchet.measure(
 )
   rulings = read_rulings(dir)
   settings = jet_settings(rulings)
+  validate_dismissals(rulings)
 
   for name in settings.load
     Base.require(Main, Symbol(name))
@@ -187,7 +227,7 @@ function CodeRatchet.measure(
   for report in reports
     rel = attribute(report, root)
     haskey(rows, rel) || continue
-    record_report!(rows[rel], report, rulings)
+    record_report!(rows[rel], report, rulings, jet_finding_identity(report, root))
   end
   return rows
 end

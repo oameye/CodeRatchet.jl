@@ -96,7 +96,9 @@ jet_identity_fixture_other(x::String) = x + 1
     class = "MethodErrorReport"
     reason = "too broad"
     """)
-    @test_throws ErrorException EXT.dismissed(MethodErrorReport(StubFrame[], "anything"), rulings)
+    @test_throws ErrorException EXT.dismissed(
+      MethodErrorReport(StubFrame[], "anything"), rulings
+    )
     @test_throws ErrorException EXT.validate_dismissals(rulings)
   end
 

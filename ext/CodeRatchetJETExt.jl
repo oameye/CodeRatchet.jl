@@ -17,13 +17,13 @@ using TOML: TOML
 """
     Inference()
 
-JET reports per file, ratcheted on the **reviewed** count.
+JET reports per file, ratcheted on the **reviewed** count and reviewed finding
+identities.
 
-The reviewed number binds and the raw count is context. That split is what
-makes a dismissal work: a dismissal covers a *class* of report, so the
-fifteenth instance of an already-dismissed class must stay green. Binding on
-the raw count instead would turn every new instance of a known non-defect red,
-and a gate that cries wolf gets switched off.
+The reviewed number and finding multiset bind; the raw count is context. A
+dismissal must name a semantic message pattern, optionally narrowed by report
+class, so an unrelated future report cannot disappear merely because it shares
+a broad JET report type.
 """
 struct Inference <: CodeRatchet.Metric end
 
@@ -105,37 +105,50 @@ function attribute(report, root::AbstractString)
 end
 
 """
-    dismissed(report, rulings) -> Bool
+    jet_owner_identity(report) -> String
 
-Whether a human has ruled this class of report a non-defect.
-
-A `[[dismissal]]` may name a `class` (the report type) and a `pattern` (a
-regex over the rendered message). Every field present must match, so a
-dismissal narrows rather than widens as you specify more of it.
+Location-free identity of the innermost enclosing MethodInstance. This keeps two
+otherwise identical JET reports in different methods distinct without binding
+source lines or file-system paths.
 """
+function jet_owner_identity(report::JET.JETInterface.InferenceErrorReport)
+  isempty(report.vst) && return "toplevel"
+  return sprint(JET.show_mi, report.vst[end].linfo)
+end
+
 jet_finding_identity(report) = sprint(show, report)
+function jet_finding_identity(report::JET.JETInterface.InferenceErrorReport)
+  return jet_owner_identity(report) * " :: " * sprint(show, report)
+end
 
 function CodeRatchet.finding_identity(report::JET.JETInterface.InferenceErrorReport)
   return jet_finding_identity(report)
 end
 
+"""
+    dismissed(report, rulings) -> Bool
+
+Whether a human has ruled this semantic report pattern a non-defect.
+
+Every `[[dismissal]]` needs a non-empty `pattern` regex over the finding
+identity and a `reason`; `class` is optional and only narrows the match. A
+class-only dismissal is refused because it would silently suppress every future
+report of that JET class.
+"""
 function dismissed(report, rulings::Rulings)
   class = string(nameof(typeof(report)))
   message = jet_finding_identity(report)
   for ruling in get(rulings.raw, "dismissal", Dict[])
     haskey(ruling, "reason") || error("every [[dismissal]] needs a `reason`")
+    haskey(ruling, "pattern") || error(
+      "every [[dismissal]] needs a non-empty `pattern`; class-only dismissals are open-ended"
+    )
+    pattern = String(ruling["pattern"])
+    isempty(pattern) && error("every [[dismissal]] needs a non-empty `pattern`")
     if haskey(ruling, "class") && String(ruling["class"]) != class
       continue
     end
-    if haskey(ruling, "pattern") && !occursin(Regex(String(ruling["pattern"])), message)
-      continue
-    end
-    haskey(ruling, "class") ||
-      haskey(ruling, "pattern") ||
-      error(
-        "a [[dismissal]] with neither `class` nor `pattern` would dismiss every " *
-        "report; name at least one",
-      )
+    occursin(Regex(pattern), message) || continue
     return true
   end
   return false

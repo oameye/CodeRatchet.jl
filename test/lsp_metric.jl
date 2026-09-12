@@ -32,6 +32,7 @@ entry = ["src/Pkg.jl"]
 
 [[lsp_dismissal]]
 code = "lowering/unsorted-import-names"
+pattern = "Names are not sorted"
 reason = "Export order groups by concept here, not alphabetically."
 """
 
@@ -97,7 +98,7 @@ reason = "Export order groups by concept here, not alphabetically."
       "src/inner.jl", 79, "info", "lowering/unused-argument", "Unused argument `operator`"
     )
 
-    @testset "a dismissal matching the code holds" begin
+    @testset "a semantic dismissal matching code and message holds" begin
       @test dismissed(hint, rulings)
     end
 
@@ -139,7 +140,13 @@ reason = "Export order groups by concept here, not alphabetically."
     code_only = make(
       base * "\n[[lsp_dismissal]]\ncode = \"lowering/unused-argument\"\nreason = \"r\"\n"
     )
-    @test dismissed(d, code_only)
+    @test_throws ErrorException dismissed(d, code_only)
+    @test_throws ErrorException CodeRatchet.validate_lsp_dismissals(code_only)
+
+    pattern_only = make(
+      base * "\n[[lsp_dismissal]]\npattern = \"Unused argument\"\nreason = \"r\"\n"
+    )
+    @test dismissed(d, pattern_only)
 
     # Adding a field that does not match must NARROW the dismissal, never widen
     # it. A dismissal that grew as it was specified would be a trap.
@@ -153,12 +160,12 @@ reason = "Export order groups by concept here, not alphabetically."
     wrong_severity = make(
       base *
       "\n[[lsp_dismissal]]\ncode = \"lowering/unused-argument\"\n" *
-      "severity = \"error\"\nreason = \"r\"\n",
+      "severity = \"error\"\npattern = \"Unused argument\"\nreason = \"r\"\n",
     )
     @test !dismissed(d, wrong_severity)
   end
 
-  @testset "a dismissal naming nothing would dismiss everything, so it is refused" begin
+  @testset "a dismissal without a semantic pattern is refused" begin
     rulings = read_rulings(
       dirname(
         (
@@ -172,6 +179,25 @@ reason = "Export order groups by concept here, not alphabetically."
     )
     d = Diagnostic("src/a.jl", 1, "info", "c", "m")
     @test_throws ErrorException dismissed(d, rulings)
+  end
+
+  @testset "an empty dismissal pattern is refused" begin
+    root = gitrepo(
+      Dict("src/a.jl" => "f(x) = x");
+      rulings="""
+      [scope]
+      measure = ["src/"]
+
+      [lsp]
+      entry = ["src/a.jl"]
+
+      [[lsp_dismissal]]
+      pattern = ""
+      reason = "r"
+      """,
+    )
+    rulings = read_rulings(joinpath(root, "code_ratchet"))
+    @test_throws ErrorException CodeRatchet.validate_lsp_dismissals(rulings)
   end
 
   @testset "settings" begin

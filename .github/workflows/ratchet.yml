@@ -4,7 +4,7 @@
 #     ratchet:
 #       uses: oameye/CodeRatchet.jl/.github/workflows/ratchet.yml@main
 #       with:
-#         julia-version: '1.12'
+#         julia-version: '1.13'
 #
 # Copying a workflow into forty repositories means forty copies that drift.
 # Calling one means the gate's CI behaviour has a single definition, and a fix
@@ -18,7 +18,7 @@ on:
       julia-version:
         description: 'Julia version to run the gate under.'
         type: string
-        default: '1.12'
+        default: '1.13'
       ratchet-dir:
         description: 'Where rulings.toml and the baselines live.'
         type: string

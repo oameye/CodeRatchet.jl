@@ -17,10 +17,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 1.12 is the floor, not a preference. Boxes needs Base.visit, the
-        # `public` keyword the Docstrings metric reads is 1.11, and 1.12 is
-        # where lowering stopped boxing a capture reassigned before capture.
-        julia: ['1.12', '1.13']
+        # 1.13 is the floor by choice. The technical floor is 1.12 (Boxes needs
+        # Base.visit and 1.12's lowering, Docstrings needs 1.11's `public`),
+        # but 1.12 is no longer supported, so it is no longer tested.
+        julia: ['1.13']
         os: [ubuntu-latest]
     steps:
       - uses: actions/checkout@v4
@@ -48,12 +48,14 @@ jobs:
     needs: test
     uses: ./.github/workflows/ratchet.yml
     with:
-      julia-version: '1.12'
+      # An exact patch, not '1.13': the lsp baseline records jetls's
+      # "julia version 1.13.1" string, and a newer patch would not compare.
+      julia-version: '1.13.1'
       coverage: true
       install-jetls: true
       # The revision the lsp baseline was taken under. `release` moves, and an
       # unpinned tool reddens the gate for a change nobody made.
-      jetls-rev: '6893fcef26708d64360c048e039102c76ad032c0'
+      jetls-rev: '2b51ac041fe9b1901ce8ead3ed88753721de3035'
 
   format:
     name: Format

@@ -194,6 +194,24 @@ reason = "Test code."
     @testset "a non-repository is an error, not a silent walk" begin
       @test_throws ErrorException tracked_julia_files(mktempdir())
     end
+
+    @testset "a subdirectory of a checkout is an error, not a partial list" begin
+      @test_throws ErrorException tracked_julia_files(joinpath(root, "src"))
+    end
+
+    @testset "a linked worktree is a working tree" begin
+      # In a `git worktree add` checkout `.git` is a file, not a directory.
+      worktree = joinpath(mktempdir(), "wt")
+      run(
+        pipeline(
+          Cmd(`git worktree add -q -b wt $worktree`; dir=root);
+          stdout=devnull,
+          stderr=devnull,
+        ),
+      )
+      @test isfile(joinpath(worktree, ".git"))
+      @test tracked_julia_files(worktree) == ["src/a.jl", "test/t.jl"]
+    end
   end
 
   @testset "lcov parsing" begin

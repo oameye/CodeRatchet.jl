@@ -480,12 +480,38 @@ declared unmeasured to keep the gate green. `-z` because a path may contain a
 newline.
 """
 function tracked_julia_files(root::AbstractString)
-  isdir(joinpath(root, ".git")) || error(
+  is_git_toplevel(root) || error(
     "$root is not a git working tree. CodeRatchet takes its file list from " *
     "`git ls-files`, because a directory walk would pick up untracked files.",
   )
   out = read(Cmd(`git ls-files -z -- "*.jl"`; dir=root), String)
   return sort!(filter!(!isempty, split(out, '\0')))
+end
+
+"""
+    is_git_toplevel(root) -> Bool
+
+Whether `root` is the top of a git working tree, as git itself sees it.
+
+Git is asked rather than `.git` inspected, because in a linked worktree
+(`git worktree add`) `.git` is a file pointing at the real git directory, not a
+directory. The top-level check keeps a subdirectory of a checkout from passing,
+since `git ls-files` there would list only that subtree.
+"""
+function is_git_toplevel(root::AbstractString)
+  isdir(root) || return false
+  toplevel = try
+    # stderr is swallowed: outside a working tree git prints `fatal:`, and the
+    # caller turns `false` into its own error.
+    strip(
+      read(
+        pipeline(Cmd(`git rev-parse --show-toplevel`; dir=root); stderr=devnull), String
+      ),
+    )
+  catch
+    return false
+  end
+  return realpath(toplevel) == realpath(root)
 end
 
 """

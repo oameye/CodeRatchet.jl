@@ -119,9 +119,9 @@ Only the three metrics needing no extra setup are switched on. `coverage`,
 gate a repository cannot yet run makes its first check fail for a reason that
 has nothing to do with its code.
 
-**CodeRatchet needs Julia 1.12, and your package does not.** The ratchet
+**CodeRatchet needs Julia 1.13, and your package does not.** The ratchet
 environment is its own, so a package supporting 1.10 can still be gated by a
-job running 1.12.
+job running 1.13.
 
 ### In CI
 
@@ -130,15 +130,20 @@ jobs:
   ratchet:
     uses: oameye/CodeRatchet.jl/.github/workflows/ratchet.yml@main
     with:
-      julia-version: '1.12'
+      julia-version: '1.13.1'          # exact patch if you run lsp; see below
       coverage: true                   # only if you run the coverage metric
       install-jetls: true              # only if you run the lsp metric
-      jetls-rev: '6893fcef26...'       # pin it; `release` moves under you
+      jetls-rev: '2b51ac041f...'       # pin it; `release` moves under you
       metrics: 'complexity style docs' # optional: narrow, never widen
 ```
 
 Calling the workflow rather than copying it means the gate's CI behaviour has
 one definition. Forty copies drift; one call does not.
+
+`julia-version` is an exact patch when the lsp metric runs, because JETLS
+reports its Julia as `julia version 1.13.1` and that whole string is compared.
+A bare `'1.13'` resolves to the newest patch, so a Julia release would redden
+the gate under a baseline nobody touched.
 
 `coverage: true` runs the tests with coverage and builds the `lcov.info` the
 coverage metric reads, since that metric measures a tracefile rather than the
@@ -459,5 +464,5 @@ the ADR-linked approval structure for rulings.
 
 ## Status
 
-Used by FloquetExpansions.jl. Not registered. `Inference()` needs Julia 1.12
+Used by FloquetExpansions.jl. Not registered. `Inference()` needs Julia 1.13
 and JET 0.12.

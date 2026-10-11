@@ -119,7 +119,11 @@ function run_coverage(root::AbstractString)
   code = "using Pkg; Pkg.test(; coverage=$(repr(lcov)))"
   # A child started from inside another `Pkg.test` inherits its sandboxed load
   # path, and would then fail to find the package under test.
-  cmd = `$(Base.julia_cmd()) --startup-file=no --project=$root -e $code`
+  # `julia_cmd` repeats the parent's flags. When the parent itself runs with
+  # coverage on, the child would inherit that and record into the parent's file
+  # instead of the one asked for, so switch it off for the child's own process;
+  # `Pkg.test` turns it on again for the tests.
+  cmd = `$(Base.julia_cmd()) --code-coverage=none --startup-file=no --project=$root -e $code`
   Base.run(addenv(cmd, "JULIA_LOAD_PATH" => nothing, "JULIA_PROJECT" => nothing))
   isfile(lcov) || error("the test run wrote no coverage file at $lcov")
   return lcov

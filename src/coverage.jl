@@ -1,60 +1,10 @@
 """
-    Coverage()
-
-The line-coverage half of the gate. Reads an `lcov.info`, which
-`julia-actions/julia-processcoverage` writes in the test job, so it loads
-nothing under measurement.
-
-A file's **miss count** binds and its relevant-line count is context, the same
-split `Complexity` draws between a maximum and a sum.
-
-The percentage is deliberately not the metric. It rises when an uncovered line
-is deleted and it rises when a covered one is added, so a file can improve its
-percentage while gaining misses. The miss count is the number that goes to
-zero, and it moves in the right direction on its own: adding a covered
-function raises `lines` and leaves `misses` alone, so ordinary work is quiet.
-
-An exemption never touches the binding number. It is a claim about specific
-lines in a specific definition, held to its exact count in both directions, and
-lowering the number it stands for is the only way to lower the ratchet.
-"""
-struct Coverage <: Metric end
-
-metric_name(::Coverage) = "coverage"
-binding(::Coverage) = ("misses",)
-row_numbers(::Coverage) = ("lines", "misses")
-
-function provenance(::Coverage, root::AbstractString)
-  return Dict{String,Any}(
-    "metric" => "coverage",
-    "source" => "lcov",
-    "attribution" => "top_level_definition_ranges",
-    "commit" => short_commit(root),
-  )
-end
-
-"""
-    lcov_path(root) -> String
-
-Where the gate looks for the tracefile. `COVERAGE_LCOV` overrides it, which is
-how a CI job hands over the file it downloaded from the test job's artifact.
-"""
-lcov_path(root::AbstractString) = get(ENV, "COVERAGE_LCOV", joinpath(root, "lcov.info"))
-
-"""
     parse_lcov(path, root) -> Dict{String,Dict{Int,Int}}
 
-The `DA:<line>,<count>` records, per repository-relative source file.
-
-Coverage.jl writes `SF`, `DA`, `LH`, `LF` and `end_of_record` and no function
-records at all, so a line is the only unit there is. A line with no `DA` record
-is not executable and is never counted.
+The `DA:<line>,<count>` records, per source file relative to `root`. A line with
+no `DA` record is not executable and is never counted.
 """
 function parse_lcov(path::AbstractString, root::AbstractString)
-  isfile(path) || error(
-    "no lcov tracefile at $path. Run the tests with `--code-coverage=user` and " *
-    "process them, or point COVERAGE_LCOV at the file.",
-  )
   hits = Dict{String,Dict{Int,Int}}()
   current = ""
   for line in eachline(path)
@@ -69,8 +19,8 @@ function parse_lcov(path::AbstractString, root::AbstractString)
       count = tryparse(Int, body[(comma + 1):end])
       (number === nothing || count === nothing) && continue
       table = hits[current]
-      # A file measured by more than one session appears twice. The hits add
-      # up, so a line covered by either session is covered.
+      # A file measured by more than one process appears twice, and the hits add
+      # up, so a line covered by either is covered.
       table[number] = get(table, number, 0) + count
     elseif startswith(line, "end_of_record")
       current = ""
@@ -80,145 +30,54 @@ function parse_lcov(path::AbstractString, root::AbstractString)
 end
 
 """
-    relative_to(path, root) -> String
-
-An `SF:` record's path as a repository-relative one. Coverage.jl writes the
-path it was given, so it may be absolute or relative depending on where
-`julia-processcoverage` ran.
-"""
-function relative_to(path::AbstractString, root::AbstractString)
-  p = replace(String(path), '\\' => '/')
-  base = replace(abspath(root), '\\' => '/')
-  base = endswith(base, "/") ? base : base * "/"
-  startswith(p, base) && (p = p[(length(base) + 1):end])
-  return startswith(p, "./") ? p[3:end] : p
-end
-
-# --- attributing a miss to a definition ------------------------------------
-#
-# A per-file miss count cannot see a leak inside an exempted definition: a line
-# covered elsewhere in the file pays for a newly uncovered line inside the
-# exemption, and the file total stays flat. Attributing each miss to the
-# definition holding it is what lets an exemption be held to an exact count.
-
-"""
-The name a miss carries when it lies inside no named top-level definition. A
-`const`, an `include` and a `precompile` block all land here, and it is a
-legitimate exemption target.
+The name a miss carries when it lies inside no named top-level definition: a
+`const`, an `include`, a `precompile` block.
 """
 const TOPLEVEL = "<toplevel>"
-
-defname(x::Symbol) = String(x)
-defname(x::QuoteNode) = defname(x.value)
-# A docstring parses to `Expr(:macrocall, GlobalRef(Core, Symbol("@doc")), …)`,
-# and a GlobalRef is neither a Symbol nor an Expr. Without this method every
-# documented definition falls to the default and is attributed to <toplevel>.
-defname(x::GlobalRef) = defname(x.name)
-defname(::Any) = ""
-function defname(e::Expr)
-  isempty(e.args) && return ""
-  oneof(e.head, (:call, :where, :(<:), :curly, :macrocall)) && return defname(e.args[1])
-  oneof(e.head, (:(::), :.)) && return defname(e.args[end])
-  return ""
-end
-
-"""
-    unwrap(e)
-
-Drop a docstring wrapper, since a documented definition would otherwise be
-named after the doc macro. Nearly every public definition is documented, so
-this is not a corner case.
-"""
-function unwrap(e)
-  if e isa Expr && e.head === :macrocall && defname(e.args[1]) == "@doc"
-    return unwrap(e.args[end])
-  end
-  return e
-end
-
-"""
-    definition_name(e) -> String
-
-The name an exemption row writes for one top-level expression, or `""` when the
-expression declares nothing a reader would name.
-"""
-function definition_name(e0)
-  e = unwrap(e0)
-  e isa Expr || return ""
-  if oneof(e.head, (:function, :macro))
-    return defname(e.args[1])
-  elseif e.head === :(=) && e.args[1] isa Expr && oneof(e.args[1].head, (:call, :where))
-    return defname(e.args[1])
-  elseif e.head === :struct
-    return length(e.args) >= 2 ? defname(e.args[2]) : ""
-  elseif oneof(e.head, (:abstract, :primitive))
-    return isempty(e.args) ? "" : defname(e.args[1])
-  elseif e.head === :const
-    return e.args[1] isa Expr ? defname(e.args[1].args[1]) : defname(e.args[1])
-  elseif e.head === :macrocall
-    # A macro that wraps a definition names the definition, not the macro:
-    # naming the macro would collapse every call in a file onto one key.
-    inner = definition_name(e.args[end])
-    return isempty(inner) ? defname(e.args[1]) : inner
-  end
-  return ""
-end
 
 function line_numbers!(acc::Vector{Int}, e)
   if e isa LineNumberNode
     push!(acc, e.line)
   elseif e isa Expr
-    for a in e.args
-      line_numbers!(acc, a)
-    end
+    foreach(a -> line_numbers!(acc, a), e.args)
   end
   return acc
 end
 
-"""
-    definition_ranges(root, rel) -> Vector{Tuple{String,Int,Int}}
-
-One entry per named top-level definition: its name and the first and last
-source line it holds.
-
-The range comes from the `LineNumberNode`s the parser leaves in the expression,
-and every executable line carries one, so a miss always falls inside the range
-of the definition holding it. The walk is top-level only: a closure inside a
-function is attributed to that function, because an exemption is written and
-read by a human and a human names the method.
-"""
+# One entry per named top-level definition: its name and the first and last
+# source line it holds. A closure inside a function belongs to that function, and
+# a `module` block is walked through so a single-file package is not one big
+# definition.
 function definition_ranges(root::AbstractString, rel::AbstractString)
   out = Tuple{String,Int,Int}[]
-  top = try
-    Meta.parseall(read(joinpath(root, rel), String); filename=rel)
-  catch
-    return out
-  end
-  top isa Expr || return out
-  for a in top.args
-    a isa Expr || continue
-    name = definition_name(a)
-    isempty(name) && continue
-    lines = line_numbers!(Int[], a)
-    isempty(lines) && continue
-    push!(out, (name, minimum(lines), maximum(lines)))
-  end
+  add_ranges!(out, parse_file(root, rel).args)
   return out
 end
 
-"""
-    misses_by_definition(root, rel, table) -> Dict{String,Int}
+function add_ranges!(out, args)
+  start = 0
+  for a in args
+    if a isa LineNumberNode
+      start = a.line
+    elseif a isa Expr && a.head === :module
+      add_ranges!(out, a.args[end].args)
+    elseif a isa Expr
+      name = definition_name(a)
+      isempty(name) && continue
+      # The line before the definition is where it starts, and for a one-line
+      # method it is the only line there is.
+      lines = line_numbers!(start > 0 ? [start] : Int[], a)
+      isempty(lines) && continue
+      push!(out, (name, minimum(lines), maximum(lines)))
+    end
+  end
+  return nothing
+end
 
-Uncovered lines in one file, grouped by the definition holding them.
-
-A line inside more than one range is attributed to the innermost, so a
-definition nested in another does not double count.
-"""
-function misses_by_definition(
-  root::AbstractString, rel::AbstractString, table::Dict{Int,Int}
-)
+# Uncovered lines of one file, grouped by the innermost definition holding them.
+function misses_by_definition(root::AbstractString, rel::AbstractString, table)
   ranges = definition_ranges(root, rel)
-  counts = Dict{String,Int}()
+  found = Dict{String,Vector{Int}}()
   for (line, hits) in table
     iszero(hits) || continue
     best, width = TOPLEVEL, typemax(Int)
@@ -227,125 +86,80 @@ function misses_by_definition(
       span = last_line - first_line
       span < width && ((best, width) = (name, span))
     end
-    counts[best] = get(counts, best, 0) + 1
+    push!(get!(found, best, Int[]), line)
   end
-  return counts
-end
-
-# --- exemptions -------------------------------------------------------------
-
-"""
-    exemptions(rulings) -> Dict{String,Dict{String,Int}}
-
-The `[[exemption]]` rows, keyed by path and then by definition.
-
-A row states how many uncovered lines in that definition may stand, so the
-count is part of the claim rather than a free pass on the whole definition.
-"""
-function exemptions(rulings::Rulings)
-  out = Dict{String,Dict{String,Int}}()
-  for entry in get(rulings.raw, "exemption", Dict[])
-    for field in ("path", "definition", "misses", "reason")
-      haskey(entry, field) || error(
-        "every [[exemption]] needs `path`, `definition`, `misses` and `reason`; got $(entry)",
-      )
-    end
-    table = get!(out, String(entry["path"]), Dict{String,Int}())
-    name = String(entry["definition"])
-    table[name] = get(table, name, 0) + Int(entry["misses"])
-  end
-  return out
-end
-
-function measure(::Coverage, root::AbstractString; dir::AbstractString=ratchet_dir(root))
-  rulings = read_rulings(dir)
-  measured = parse_lcov(lcov_path(root), root)
-  rows = Dict{String,Row}()
-  for rel in scoped_files(root, rulings.scope)
-    table = get(measured, rel, Dict{Int,Int}())
-    rows[rel] = Row(
-      Dict("lines" => length(table), "misses" => count(iszero, values(table)))
-    )
-  end
-  return rows
+  return found
 end
 
 """
-    ruling_failures(::Coverage, root) -> Vector{String}
+    with_unrun_code(path, table) -> Dict{Int,Int}
 
-An exemption is held to its exact count in **both** directions.
+Add a zero for every line of code that never ran.
 
-A claim above the truth is stale: the lines were covered and the row outlived
-its reason. A claim below it is the leak a file total cannot see, because a
-line covered elsewhere in the file pays for a new uncovered line inside the
-exempted definition and the ratchet reads a flat number. Equality closes both.
+Julia records a line only once its method has been compiled, so a function
+nothing ever called has no record at all and would read as absent, not as
+uncovered. CoverageTools reads the source to find those lines, which is the same
+step `julia-processcoverage` applies in CI.
 """
-function ruling_failures(::Coverage, root::AbstractString)
-  rulings = read_rulings(ratchet_dir(root))
-  ruled = exemptions(rulings)
-  isempty(ruled) && return String[]
-  measured = parse_lcov(lcov_path(root), root)
-  bad = String[]
-  for path in sort(collect(keys(ruled)))
-    table = get(measured, path, Dict{Int,Int}())
-    actual = misses_by_definition(root, path, table)
-    for name in sort(collect(keys(ruled[path])))
-      claimed, truth = ruled[path][name], get(actual, name, 0)
-      claimed == truth && continue
+function with_unrun_code(path::AbstractString, table::Dict{Int,Int})
+  counts = Vector{Union{Nothing,Int}}(nothing, countlines(path))
+  for (line, hits) in table
+    1 <= line <= length(counts) && (counts[line] = hits)
+  end
+  CoverageTools.amend_coverage_from_src!(counts, path)
+  return Dict{Int,Int}(i => c for (i, c) in enumerate(counts) if c !== nothing)
+end
+
+"""
+Run the package's tests with line coverage and return the LCOV file's path,
+inside a fresh temporary directory so no earlier run can contaminate it.
+"""
+function run_coverage(root::AbstractString)
+  lcov = joinpath(mktempdir(), "lcov.info")
+  code = "using Pkg; Pkg.test(; coverage=$(repr(lcov)))"
+  # A child started from inside another `Pkg.test` inherits its sandboxed load
+  # path, and would then fail to find the package under test.
+  # `julia_cmd` repeats the parent's flags. When the parent itself runs with
+  # coverage on, the child would inherit that and record into the parent's file
+  # instead of the one asked for, so switch it off for the child's own process;
+  # `Pkg.test` turns it on again for the tests.
+  cmd = `$(Base.julia_cmd()) --code-coverage=none --startup-file=no --project=$root -e $code`
+  Base.run(addenv(cmd, "JULIA_LOAD_PATH" => nothing, "JULIA_PROJECT" => nothing))
+  isfile(lcov) || error("the test run wrote no coverage file at $lcov")
+  return lcov
+end
+
+"""
+    coverage(target=pwd(); lcov=nothing, paths=["src", "ext"])
+
+Every definition with uncovered lines, most uncovered first, at its first
+uncovered line.
+
+With no `lcov`, this runs the package's tests with coverage in a child Julia
+process (`Pkg.test`), so the result is never stale. Pass `lcov` to read a
+tracefile you already have, for example one CI downloaded. Coverage is line
+execution data: it says a line ran, not that anything checked the result.
+"""
+function coverage(target=pwd(); lcov=nothing, paths=["src", "ext"])
+  root = package_root(target)
+  files = source_files(root, paths)
+  path = lcov === nothing ? run_coverage(root) : String(lcov)
+  isfile(path) || throw(ArgumentError("no lcov tracefile at $path"))
+  hits = parse_lcov(path, root)
+  items = Finding[]
+  for rel in files
+    # A file the run never loaded has no record at all, which means every
+    # executable line of it is uncovered, not that there is nothing to report.
+    table = with_unrun_code(joinpath(root, rel), get(hits, rel, Dict{Int,Int}()))
+    for (name, lines) in misses_by_definition(root, rel, table)
+      sort!(lines)
       push!(
-        bad,
-        "$path: the exemption for `$name` claims $claimed uncovered line(s) but " *
-        "$truth remain. " *
-        (
-          if claimed > truth
-            "Lower or remove the ruling."
-          else
-            "Cover the new one, or raise the ruling with its reason."
-          end
+        items,
+        Finding(
+          rel, first(lines), name, length(lines), "uncovered lines: $(join(lines, ", "))"
         ),
       )
     end
   end
-  return bad
-end
-
-"""
-    entry_failures(::Coverage, root, paths, rows) -> Vector{String}
-
-A file entering with no baseline row enters fully covered or fully exempted.
-
-Coverage is the one metric with a meaningful, reachable zero, so a new file has
-no excuse to arrive with unexplained misses.
-"""
-function entry_failures(::Coverage, root::AbstractString, paths, ::Any)
-  isempty(paths) && return String[]
-  rulings = read_rulings(ratchet_dir(root))
-  ruled = exemptions(rulings)
-  measured = parse_lcov(lcov_path(root), root)
-  bad = String[]
-  for path in sort(collect(paths))
-    table = get(measured, path, Dict{Int,Int}())
-    actual = misses_by_definition(root, path, table)
-    claimed = get(ruled, path, Dict{String,Int}())
-    remainder = sum(max(0, n - get(claimed, name, 0)) for (name, n) in actual; init=0)
-    remainder > 0 && push!(
-      bad,
-      "$path enters with $remainder uncovered line(s) that no exemption accounts for. " *
-      "Cover them, or add an [[exemption]] row naming the definition and the count.",
-    )
-  end
-  return bad
-end
-
-"""
-    terminal(root; dir) -> Vector{String}
-
-The files still short of zero misses, worst first. The terminal condition the
-map drives toward, which the ratchet alone never reports.
-"""
-function terminal(root::AbstractString=pwd(); dir::AbstractString=ratchet_dir(root))
-  rows = measure(Coverage(), root; dir)
-  short = [(p, r["misses"]) for (p, r) in rows if r["misses"] > 0]
-  sort!(short; by=x -> -x[2])
-  return ["$p: $n miss(es)" for (p, n) in short]
+  return ranked("coverage", items)
 end

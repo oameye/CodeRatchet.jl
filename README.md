@@ -1,4 +1,4 @@
-# CodeRatchet.jl
+# CodeRank.jl
 
 Rank the worst code in a Julia package, from the REPL.
 
@@ -7,7 +7,7 @@ numbers down. There is nothing to configure, store or compare: every call
 measures the code as it stands and returns `Findings`, worst first.
 
 ```julia
-using CodeRatchet
+using CodeRank
 
 complexity(MyPkg)    # definitions ranked by cyclomatic complexity
 style(MyPkg)         # house-rule breaches, with the source line
@@ -22,7 +22,7 @@ report(MyPkg)        # the first four, top five of each
 `filter`, `sum` and `sort` work, and the REPL shows the top 20.
 
 ```
-julia> complexity(CodeRatchet)
+julia> complexity(CodeRank)
 complexity (cyclomatic): 59 findings, worst 20
   src/style.jl:99      12  sig_lines!
   src/syntax.jl:142    12  definition_name
@@ -67,7 +67,7 @@ Not registered. Install it once into your global environment:
 
 ```julia
 using Pkg
-Pkg.add(url="https://github.com/oameye/CodeRatchet.jl")
+Pkg.add(url="https://github.com/oameye/CodeRatchet.jl")  # repo not renamed yet
 ```
 
 Needs Julia 1.12 or later.
@@ -85,5 +85,5 @@ paraphrase his rationale closely enough to be derived text. `boxes` is derived
 from `contrib/scan-closure-boxes.jl` in JuliaLang/julia (MIT). `LICENSE`
 itemises all of it.
 
-This repository was a per-file ratchet, a gate that fails when a number rises
-above a stored baseline. That design is in the git history before this branch.
+This package was called CodeRatchet while it was a per-file ratchet, a gate that
+fails when a number rises above a stored baseline. That design is in the git history before this branch.

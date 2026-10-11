@@ -1,4 +1,4 @@
-using CodeRatchet
+using CodeRank
 using Test
 
 # A throwaway package directory holding `files`, a map from relative path to text.
@@ -14,7 +14,7 @@ end
 
 place(f) = (f.file, f.line, f.what)
 
-@testset "CodeRatchet" begin
+@testset "CodeRank" begin
   @testset "complexity" begin
     src = """
     function flat(x)
@@ -213,8 +213,8 @@ place(f) = (f.file, f.line, f.what)
   end
 
   @testset "findings display" begin
-    items = [CodeRatchet.Finding("src/a.jl", i, "f$i", i, "") for i in 1:25]
-    shown = sprint(show, MIME"text/plain"(), CodeRatchet.ranked("demo", items))
+    items = [CodeRank.Finding("src/a.jl", i, "f$i", i, "") for i in 1:25]
+    shown = sprint(show, MIME"text/plain"(), CodeRank.ranked("demo", items))
     @test occursin("demo: 25 findings, worst 20", shown)
     @test occursin("… 5 more", shown)
   end

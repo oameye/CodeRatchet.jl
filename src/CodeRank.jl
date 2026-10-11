@@ -1,5 +1,5 @@
 """
-    CodeRatchet
+    CodeRank
 
 Rank the worst code in a Julia package, from the REPL.
 
@@ -8,7 +8,7 @@ the numbers down. Nothing is configured, stored or compared: every call
 measures the code as it stands and returns [`Findings`](@ref), worst first.
 
 ```julia
-using CodeRatchet
+using CodeRank
 complexity(MyPkg)      # definitions ranked by cyclomatic complexity
 style(MyPkg)           # house-rule breaches, with line numbers
 docstrings(MyPkg)      # public names with no docstring
@@ -24,7 +24,7 @@ thresholds that pass or fail and nothing to dismiss.
 Adapted from the `code_health/` directory of PortfolioOptimisers.jl by Daniel
 Celis Garza (MIT). See LICENSE.
 """
-module CodeRatchet
+module CodeRank
 
 using CoverageTools: CoverageTools
 using JuliaSyntax: JuliaSyntax

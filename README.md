@@ -15,6 +15,10 @@ docstrings(MyPkg)    # public names with no docstring
 boxes(MyPkg)         # captured variables the compiler could not type
 coverage(MyPkg)      # definitions with uncovered lines (runs the tests)
 report(MyPkg)        # the first four, top five of each
+
+invalidations(MyPkg; workload="...")  # methods that made compiled code stale
+triggers(MyPkg; workload="...")       # compiler work a workload still pays for
+image(MyPkg)                          # what the precompiled image holds
 ```
 
 `MyPkg` is a loaded package module or a directory path. Results are
@@ -45,7 +49,30 @@ style rules, no baselines, no config files.
 | `boxes(mod; root=...)` | `Core.Box` captures per method, with the variable's name, from lowered code | seconds |
 | `coverage(target; lcov=nothing)` | definitions with uncovered lines; runs `Pkg.test` with coverage unless you pass a tracefile | test time |
 
-`paths=["src", "ext"]` sets what is measured. A file that does not parse is an
+### Compiler facts
+
+The last three look at what the compiler did, so they run in a fresh Julia
+process. Loading the analyser first would change the events it is meant to
+explain, so the child holds only the collector until the capture ends. The
+snoop tooling (SnoopCompileCore, SnoopCompile, PkgCacheInspector) lives in a
+shared environment named `coderatchet` under your depot, created on first use
+and never added to the package you measure. The package's own environment must
+be instantiated, as it is when you develop it.
+
+| Function | What it reports |
+| --- | --- |
+| `invalidations(target; workload=nothing, owners=[], all=false)` | each method defined during load (and `workload`) that invalidated compiled code, ranked by how many MethodInstances it invalidated, with roots and cascade depth. Only methods the package owns by default, so a dependency's cascade is not charged to you; `owners` names more, `all=true` lists everything with its owner. |
+| `triggers(target; workload, owners=[], owned_only=false)` | each specialization that still entered inference when `workload` ran against the built image, ranked by inclusive inference time (µs). The set of signatures is exact; the time is a measurement. Precompiling a signature removes its trigger. |
+| `image(target; owned_only=false)` | the precompiled image read before the package loads: file bytes, segment sizes, counts of external methods, specializations, roots and edges, and every method the image specialized with how many specializations it holds. |
+
+`workload` is Julia code evaluated in the child. None of these says an image is
+too big or a cascade too deep: a larger image can be a faster one. The
+signatures are spelled the same way in all three, so a trigger can be looked up
+in `image` and an invalidated method in `triggers`. Invalidation logging and
+lowering change between Julia releases, so the results are true for the running
+version only.
+
+`paths=["src", "ext"]` sets what is measured by the source-level metrics. A file that does not parse is an
 error, never a zero.
 
 Notes on exactness:

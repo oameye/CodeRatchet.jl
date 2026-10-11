@@ -245,6 +245,96 @@ place(f) = (f.file, f.line, f.what)
     end
   end
 
+  # A package whose compiler facts are known: `h` calls `g` through an abstract
+  # container, so each element type enters inference unless precompiled.
+  function compiler_fixture(f; precompile_g::Bool=false)
+    uuid = "9b1a6f20-7c5d-4d1e-8c0e-0a5f4f3a1c11"
+    src = """
+    module Inval
+    export applyf, h
+    struct Foo end
+    f(::Int) = 1
+    f(::Bool) = 2
+    applyf(c) = f(c[1])
+    g(x) = x + 1
+    h(c) = g(c[1])
+    $(precompile_g ? "precompile(g, (Int,))" : "")
+    precompile(Base.copy, (Vector{Foo},))
+    precompile(Base.reverse, (Vector{Foo},))
+    end
+    """
+    return with_package(
+      f,
+      "Project.toml" => "name = \"Inval\"\nuuid = \"$uuid\"\nversion = \"0.1.0\"\n",
+      "src/Inval.jl" => src,
+    )
+  end
+
+  @testset "invalidations" begin
+    compiler_fixture() do dir
+      work = "using Inval; Inval.applyf(Any[1]); @eval Inval f(::AbstractFloat) = 3"
+      found = invalidations(dir; workload=work)
+      @test length(found) == 1
+      @test occursin("f(::AbstractFloat)", only(found).what)
+      @test only(found).value >= 1
+      @test occursin("owner Inval", only(found).detail)
+      # A method defined elsewhere is not the package's to answer for, unless named.
+      other =
+        "module Other\nf(::Int) = 1\napplyf(c) = f(c[1])\nend\n" *
+        "Other.applyf(Any[1]); @eval Other f(::AbstractFloat) = 3"
+      @test isempty(invalidations(dir; workload=other))
+      @test length(invalidations(dir; workload=other, all=true)) == 1
+      @test length(invalidations(dir; workload=other, owners=["Main"])) == 1
+      # Loading the package alone invalidates nothing here.
+      @test isempty(invalidations(dir))
+    end
+  end
+
+  @testset "inference triggers" begin
+    work = "using Inval; Inval.h(Any[1]); Inval.h(Any[2.0])"
+    compiler_fixture() do dir
+      found = triggers(dir; workload=work)
+      sigs = [f.what for f in found]
+      @test "Tuple{typeof(Inval.g), Int64}" in sigs
+      @test "Tuple{typeof(Inval.g), Float64}" in sigs
+      @test all(
+        f -> f.file == "src/Inval.jl", filter(f -> occursin("Inval", f.what), found)
+      )
+      @test issorted(found; by=f -> -f.value)
+      # A trigger in code the package does not own is listed, and can be filtered out.
+      mixed =
+        work * "; module Other\ng2(x) = x + 1\nh2(c) = g2(c[1])\nend; Other.h2(Any[1])"
+      everything = triggers(dir; workload=mixed)
+      ours = triggers(dir; workload=mixed, owned_only=true)
+      @test any(f -> occursin("owner Main", f.detail), everything)
+      @test !any(f -> occursin("owner Main", f.detail), ours)
+      @test length(triggers(dir; workload=mixed, owned_only=true, owners=["Main"])) ==
+        length(everything)
+    end
+    # Precompiling a signature removes exactly its trigger.
+    compiler_fixture(; precompile_g=true) do dir
+      sigs = [f.what for f in triggers(dir; workload=work)]
+      @test "Tuple{typeof(Inval.g), Int64}" ∉ sigs
+      @test "Tuple{typeof(Inval.g), Float64}" in sigs
+    end
+  end
+
+  @testset "package image" begin
+    compiler_fixture() do dir
+      img = image(dir)
+      @test img isa PackageImage
+      @test img.package == "Inval"
+      @test img.bytes > 0
+      @test img.counts["specializations"] > 0
+      names = [f.what for f in img.specialized]
+      @test any(startswith("reverse("), names)
+      @test all(f -> occursin("specializations; owner ", f.detail), img.specialized)
+      @test isempty(image(dir; owned_only=true).specialized)
+      shown = sprint(show, MIME"text/plain"(), img)
+      @test occursin("package image of Inval", shown)
+    end
+  end
+
   @testset "files that do not parse are refused" begin
     with_package("src/a.jl" => "function broken(\n") do dir
       @test_throws ArgumentError complexity(dir)

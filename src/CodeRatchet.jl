@@ -30,7 +30,17 @@ using CoverageTools: CoverageTools
 using JuliaSyntax: JuliaSyntax
 using CodeComplexity: CognitiveComplexity, CyclomaticComplexity, measure_file
 
-export Findings, boxes, complexity, coverage, docstrings, report, style
+export Findings,
+  PackageImage,
+  boxes,
+  complexity,
+  coverage,
+  docstrings,
+  image,
+  invalidations,
+  report,
+  style,
+  triggers
 
 include("findings.jl")
 include("syntax.jl")
@@ -39,6 +49,10 @@ include("style.jl")
 include("docstrings.jl")
 include("boxes.jl")
 include("coverage.jl")
+include("child.jl")
+include("invalidations.jl")
+include("triggers.jl")
+include("image.jl")
 include("report.jl")
 
 end

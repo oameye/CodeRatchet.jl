@@ -28,8 +28,7 @@ module CodeRatchet
 
 using CoverageTools: CoverageTools
 using JuliaSyntax: JuliaSyntax
-using CodeComplexity:
-  ArgumentCountComplexity, CognitiveComplexity, CyclomaticComplexity, measure_file
+using CodeComplexity: CognitiveComplexity, CyclomaticComplexity, measure_file
 
 export Findings, boxes, complexity, coverage, docstrings, report, style
 

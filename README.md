@@ -83,7 +83,7 @@ Notes on exactness:
   boxing a capture reassigned before the closure is built), so the result is
   true for the running version only. It needs the module loaded, and Julia 1.12
   or later for `Base.visit`.
-- `coverage` is line execution data, not proof that anything checked a result.
+- `coverage` is line execution data, not proof that anything checked a result. A method whose body is a literal is called through its inferred constant, so it is never counted and always reads as uncovered; the finding says so.
   Julia records no line for a method that never compiled, so unrun code is
   added back from the source with CoverageTools, as `julia-processcoverage`
   does in CI.

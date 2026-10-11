@@ -346,6 +346,190 @@ place(f) = (f.file, f.line, f.what)
     end
   end
 
+  @testset "keyword arguments inside signatures" begin
+    src = """
+    function a(x::T; k = g(a = 1), z) where {T}
+      return x
+    end
+    b(p = g(q = 2)) = 1
+    function c(x; k = 2)::Int
+      return h(m = 3)
+    end
+    d(x)::Int = g(r = 4)
+    function e(x; y)
+      return x
+    end
+    """
+    with_package("src/a.jl" => src) do dir
+      lines = [f.line for f in style(dir; rules=[:implicit_kwarg])]
+      # Defaults that call with a keyword count; the signatures' own `k = 2` and
+      # `p = ...` (an optional positional) do not.
+      @test sort(lines) == [1, 4, 6, 8]
+    end
+  end
+
+  @testset "qualified Union and Nothing" begin
+    src = """
+    a(x::Core.Union{Base.Nothing,Int}) = x
+    b(x::Union{1,Int}) = x
+    c(x::Union{Int,Float64}) = x
+    """
+    with_package("src/a.jl" => src) do dir
+      @test [f.line for f in style(dir; rules=[:union_nothing])] == [1]
+    end
+  end
+
+  @testset "public declarations and definition kinds" begin
+    src = """
+    module Kinds
+    using SciMLPublic: @public
+    export Abstract, Prim, K, Typed, S, shown, dotted
+    @public one, two
+    @public three
+    abstract type Abstract end
+    primitive type Prim 8 end
+    const K = 1
+    const Typed::Int = 2
+    @kwdef struct S
+      x::Int = 1
+    end
+    Base.show(io::IO, s::S) = 1
+    dotted(x)::Int = x
+    function one() end
+    two() = 1
+    three() = 2
+    shown = 1
+    x::Int = 5
+    a.b::Int = 6
+    end
+    """
+    with_package("src/Kinds.jl" => src) do dir
+      found = [f.what for f in docstrings(dir)]
+      @test sort(found) ==
+        sort(["Abstract", "Prim", "K", "Typed", "S", "dotted", "one", "two", "three"])
+    end
+  end
+
+  @testset "names read from odd syntax" begin
+    @test CodeRatchet.defname(1) == ""
+    @test CodeRatchet.defname(:(x -> 1)) == ""
+    # Through an inference barrier: a constant argument is folded away at compile
+    # time, and the line that decides it then never runs.
+    opaque = Base.inferencebarrier(1)
+    @test CodeRatchet.names_union(opaque) == false
+    @test CodeRatchet.is_nothing_type(opaque) == false
+    @test CodeRatchet.definition_name(:(@thing 1)) == "@thing"
+    @test CodeRatchet.definition_name(:(@kwdef struct S end)) == "S"
+    @test CodeRatchet.definition_name(:(1 + 1)) == ""
+  end
+
+  @testset "a docstring on a macro-wrapped definition" begin
+    src = """
+    module Wrapped
+    export Documented, Bare
+    \"\"\"Documented.\"\"\"
+    @kwdef struct Documented
+      x::Int = 1
+    end
+    @kwdef struct Bare
+      x::Int = 1
+    end
+    end
+    """
+    with_package("src/Wrapped.jl" => src) do dir
+      @test [f.what for f in docstrings(dir)] == ["Bare"]
+    end
+  end
+
+  @testset "a documented definition is attributed by name" begin
+    src = """
+    \"\"\"A documented function.\"\"\"
+    function documented(x)
+      if x
+        return 1
+      end
+      return 2
+    end
+    """
+    with_package("src/a.jl" => src) do dir
+      lcov = joinpath(dir, "lcov.info")
+      write(lcov, "SF:src/a.jl\nDA:4,0\nDA:6,0\nend_of_record\n")
+      found = coverage(dir; lcov)
+      @test [(f.what, f.value) for f in found] == [("documented", 2)]
+    end
+  end
+
+  @testset "constant-return methods cannot be observed" begin
+    src = """
+    always(::Any) = false
+    function nothing_at_all(x)
+      return nothing
+    end
+    function real_work(x)
+      return x + 1
+    end
+    """
+    with_package("src/a.jl" => src) do dir
+      lcov = joinpath(dir, "lcov.info")
+      write(lcov, "SF:src/a.jl\nDA:1,0\nDA:3,0\nDA:6,0\nend_of_record\n")
+      found = Dict(f.what => f for f in coverage(dir; lcov))
+      @test occursin("constant-return", found["always"].detail)
+      @test occursin("constant-return", found["nothing_at_all"].detail)
+      @test !occursin("constant-return", found["real_work"].detail)
+    end
+  end
+
+  @testset "what a target may be" begin
+    @test_throws ArgumentError complexity(Main)
+    with_package("src/a.jl" => "f(x) = x\n", "src/b.jl" => "g(x) = x\n") do dir
+      found = complexity(dir; paths=["src/a.jl"])
+      @test [f.file for f in found] == ["src/a.jl"]
+      @test complexity(dir; paths=["nowhere"]) |> isempty
+    end
+    # A loaded package module stands for its own directory.
+    @test !isempty(complexity(CodeRatchet))
+  end
+
+  @testset "boxes without a name, and without a body" begin
+    lowered = Meta.lower(Main, Expr(:call, Core.Box, 1)).args[1]
+    @test CodeRatchet.lowered_boxes(lowered) == [("<unnamed>",)]
+    sourceless = only(methods(Core.setglobalonce!))
+    @test isempty(CodeRatchet.method_boxes(sourceless))
+  end
+
+  @testset "compact display" begin
+    found = CodeRatchet.ranked("demo", [CodeRatchet.Finding("src/a.jl", 1, "f", 2, "")])
+    @test repr(found) == "Findings(\"demo\", 1)"
+    @test occursin("1 finding", sprint(show, MIME"text/plain"(), found))
+    @test sprint(
+      show, MIME"text/plain"(), CodeRatchet.ranked("none", CodeRatchet.Finding[])
+    ) == "none: 0 findings"
+    @test repr(
+      CodeRatchet.PackageImage("P", 1, Dict{String,Int}(), Dict{String,Int}(), found)
+    ) == "PackageImage(\"P\")"
+  end
+
+  @testset "the tooling environment" begin
+    dir = joinpath(mktempdir(), "env")
+    # A failed install reports why, and leaves no manifest behind.
+    err = try
+      CodeRatchet.ensure_tools(dir; tools=["NoSuchPackageForCodeRatchet"])
+      nothing
+    catch e
+      e
+    end
+    @test err isa ErrorException
+    @test occursin("could not install NoSuchPackageForCodeRatchet", err.msg)
+    @test !isfile(joinpath(dir, "Manifest.toml"))
+    # A good one creates the environment once and finds it afterwards.
+    @test CodeRatchet.ensure_tools(dir; tools=["Dates"]) == dir
+    @test isfile(joinpath(dir, "Manifest.toml"))
+    stamp = mtime(joinpath(dir, "Manifest.toml"))
+    @test CodeRatchet.ensure_tools(dir; tools=["Dates"]) == dir
+    @test mtime(joinpath(dir, "Manifest.toml")) == stamp
+    @test endswith(CodeRatchet.tools_environment(), joinpath("environments", "coderatchet"))
+  end
+
   @testset "files that do not parse are refused" begin
     with_package("src/a.jl" => "function broken(\n") do dir
       @test_throws ArgumentError complexity(dir)

@@ -285,6 +285,16 @@ place(f) = (f.file, f.line, f.what)
       @test isempty(invalidations(dir; workload=other))
       @test length(invalidations(dir; workload=other, all=true)) == 1
       @test length(invalidations(dir; workload=other, owners=["Main"])) == 1
+      # A log SnoopCompile cannot read fails loudly rather than reporting nothing.
+      constant = "module Other\nconst X = 1\nf() = X\nend\nOther.f(); @eval Other const X = 2"
+      err = try
+        invalidations(dir; workload=constant)
+        nothing
+      catch e
+        e
+      end
+      @test err isa ErrorException
+      @test occursin("SnoopCompile cannot read", err.msg)
       # Loading the package alone invalidates nothing here.
       @test isempty(invalidations(dir))
     end

@@ -68,7 +68,8 @@ be instantiated, as it is when you develop it.
 `workload` is Julia code evaluated in the child. None of these says an image is
 too big or a cascade too deep: a larger image can be a faster one. The
 signatures are spelled the same way in all three, so a trigger can be looked up
-in `image` and an invalidated method in `triggers`. Invalidation logging and
+in `image` and an invalidated method in `triggers`. Redefining a constant logs an event SnoopCompile cannot read yet, and
+`invalidations` then says so instead of reporting nothing. Invalidation logging and
 lowering change between Julia releases, so the results are true for the running
 version only.
 

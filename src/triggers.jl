@@ -1,4 +1,5 @@
-const TRIGGERS_SCRIPT = CHILD_PRELUDE * raw"""
+const TRIGGERS_SCRIPT =
+  CHILD_PRELUDE * raw"""
 using Pkg
 Pkg.precompile()
 const NAME = ARGS[2]
@@ -11,17 +12,34 @@ Base.require(Main, Symbol(NAME))
 tinf = @snoop_inference Base.include_string(Main, WORKLOAD)
 
 using SnoopCompile
+# `inference_triggers` throws on a root that carries no backtrace, which a real
+# workload produces (a cache update inside inference, say). Build each trigger
+# here instead: a root with no backtrace is still compiler work the workload paid
+# for, only its caller is unknown.
+function trigger_of(child)
+    bt = child.bt
+    bt === nothing && return (child, StackTraces.StackFrame[])
+    frames, idx = something(SnoopCompile.next_julia_frame(bt, 0), (StackTraces.StackFrame[], 0))
+    trigger = SnoopCompile.InferenceTrigger(child, frames, idx)
+    return SnoopCompile.maybe_internal(trigger) ? (child, frames) : nothing
+end
+
 open(OUT, "w") do io
-    for trigger in inference_triggers(tinf)
-        mi = Core.Compiler.get_ci_mi(trigger.node.ci)
+    for child in tinf.children
+        found = trigger_of(child)
+        found === nothing && continue
+        node, frames = found
+        mi = Core.Compiler.get_ci_mi(node.ci)
         m = mi.def
         m isa Method || continue
         file, line = place(m)
-        caller = trigger.callerframes[1]
+        caller = isempty(frames) ? nothing : frames[1]
         row(io, owner(m), file, line, signature(mi),
-            round(Int, 1e6 * inclusive(trigger.node)),
-            round(Int, 1e6 * exclusive(trigger.node)),
-            caller.func, caller.file, caller.line)
+            round(Int, 1e6 * inclusive(node)),
+            round(Int, 1e6 * exclusive(node)),
+            caller === nothing ? "unknown" : caller.func,
+            caller === nothing ? "" : caller.file,
+            caller === nothing ? 0 : caller.line)
     end
 end
 """
@@ -64,7 +82,7 @@ function triggers(
         parse(Int, ln),
         sig,
         parse(Int, inclusive_us),
-        "µs inclusive, $(exclusive_us) µs exclusive; owner $module_name; called from $caller at $(relative_file(caller_file, root)):$caller_line",
+        "µs inclusive, $(exclusive_us) µs exclusive; owner $module_name; $(caller == "unknown" ? "caller unknown" : "called from $caller at $(relative_file(caller_file, root)):$caller_line")",
       ),
     )
   end

@@ -1,4 +1,5 @@
-const INVALIDATIONS_SCRIPT = CHILD_PRELUDE * raw"""
+const INVALIDATIONS_SCRIPT =
+  CHILD_PRELUDE * raw"""
 using Pkg
 Pkg.precompile()
 const NAME = ARGS[2]
@@ -14,13 +15,26 @@ end
 using SnoopCompile
 depth(node) = 1 + maximum(depth, node.children; init=0)
 open(OUT, "w") do io
-    for tree in invalidation_trees(invs)
+    trees = try
+        invalidation_trees(invs)
+    catch err
+        # Redefining a constant logs a kind of event SnoopCompile cannot read yet.
+        error("SnoopCompile cannot read this invalidation log: ", sprint(showerror, err))
+    end
+    for tree in trees
         m = tree.method
         roots = Any[last(b) for b in tree.mt_backedges]
-        append!(roots, last(b) for b in tree.backedges)
+        append!(roots, tree.backedges)
         total = sum(r -> 1 + SnoopCompile.countchildren(r), roots; init=0)
-        file, line = place(m)
-        row(io, owner(m), file, line, m, tree.reason, length(roots), total,
+        # A redefined global or constant invalidates code too; it has a binding,
+        # not a method, so there is no source line to point at.
+        who, file, line, what = if m isa Method
+            (owner(m), place(m)..., first(split(string(m), " @ ")))
+        else
+            ref = m.globalref
+            (string(nameof(Base.moduleroot(ref.mod))), "", 0, "binding $(ref.mod).$(ref.name)")
+        end
+        row(io, who, file, line, what, tree.reason, length(roots), total,
             maximum(depth, roots; init=0))
     end
 end

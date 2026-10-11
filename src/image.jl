@@ -26,7 +26,7 @@ open(OUT, "w") do io
     end
     for (m, n) in by_method
         file, line = place(m)
-        row(io, "specialized", owner(m), file, line, m, n)
+        row(io, "specialized", owner(m), file, line, first(split(string(m), " @ ")), n)
     end
 end
 """

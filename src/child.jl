@@ -56,7 +56,9 @@ function run_child(root::AbstractString, script::AbstractString, args::AbstractS
   load_path = join(["@", tools, "@stdlib"], Sys.iswindows() ? ";" : ":")
   cmd = `$(Base.julia_cmd()) --code-coverage=none --startup-file=no --history-file=no --project=$root $file $out $args`
   env = addenv(cmd, "JULIA_LOAD_PATH" => load_path, "JULIA_PROJECT" => nothing)
-  success(env) || error("the measuring process failed; see its output above")
+  log = IOBuffer()
+  success(pipeline(env; stdout=log, stderr=log)) ||
+    error("the measuring process failed:\n", String(take!(log)))
   return isfile(out) ? readlines(out) : String[]
 end
 

@@ -70,7 +70,7 @@ using Pkg
 Pkg.add(url="https://github.com/oameye/CodeRatchet.jl")
 ```
 
-Needs Julia 1.12 or later.
+Needs Julia 1.13 or later (the code runs on 1.12, which is no longer tested).
 
 ## Prior art
 

@@ -17,9 +17,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 1.12 is the floor: `boxes` needs Base.visit and `docstrings` reads the
-        # `public` keyword.
-        julia: ['1.12', '1.13']
+        # 1.13 is the floor by choice. The technical floor is 1.12 (`boxes`
+        # needs Base.visit, `docstrings` needs 1.11's `public`), but 1.12 is no
+        # longer supported, so it is no longer tested.
+        julia: ['1.13']
         os: [ubuntu-latest]
     steps:
       - uses: actions/checkout@v4

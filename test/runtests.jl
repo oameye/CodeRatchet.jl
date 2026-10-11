@@ -159,6 +159,10 @@ place(f) = (f.file, f.line, f.what)
       @test first(found).line == 6
       @test first(found).detail == "uncovered lines: 6, 8"
       @test isempty(coverage(dir; lcov, paths=["elsewhere"]))
+      # A file the tracefile never mentions was never loaded: all of it is a miss.
+      write(joinpath(dir, "src", "b.jl"), "function never(x)\n  return x\nend\n")
+      never = coverage(dir; lcov)
+      @test ("never", 2) in [(f.what, f.value) for f in never if f.file == "src/b.jl"]
       @test_throws ArgumentError coverage(dir; lcov=joinpath(dir, "missing.info"))
     end
   end

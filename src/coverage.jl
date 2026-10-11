@@ -144,8 +144,9 @@ function coverage(target=pwd(); lcov=nothing, paths=["src", "ext"])
   hits = parse_lcov(path, root)
   items = Finding[]
   for rel in files
-    haskey(hits, rel) || continue
-    table = with_unrun_code(joinpath(root, rel), hits[rel])
+    # A file the run never loaded has no record at all, which means every
+    # executable line of it is uncovered, not that there is nothing to report.
+    table = with_unrun_code(joinpath(root, rel), get(hits, rel, Dict{Int,Int}()))
     for (name, lines) in misses_by_definition(root, rel, table)
       sort!(lines)
       push!(

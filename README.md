@@ -27,9 +27,9 @@ image(MyPkg)                          # what the precompiled image holds
 
 ```
 julia> complexity(CodeRatchet)
-complexity (cyclomatic): 59 findings, worst 20
+complexity (cyclomatic): 70 findings, worst 20
   src/style.jl:99      12  sig_lines!
-  src/syntax.jl:142    12  definition_name
+  src/syntax.jl:163    12  definition_name
   ...
 ```
 

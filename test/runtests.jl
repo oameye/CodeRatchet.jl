@@ -285,16 +285,17 @@ place(f) = (f.file, f.line, f.what)
       @test isempty(invalidations(dir; workload=other))
       @test length(invalidations(dir; workload=other, all=true)) == 1
       @test length(invalidations(dir; workload=other, owners=["Main"])) == 1
-      # A log SnoopCompile cannot read fails loudly rather than reporting nothing.
-      constant = "module Other\nconst X = 1\nf() = X\nend\nOther.f(); @eval Other const X = 2"
-      err = try
-        invalidations(dir; workload=constant)
-        nothing
-      catch e
-        e
-      end
-      @test err isa ErrorException
-      @test occursin("SnoopCompile cannot read", err.msg)
+      # Redefining a constant logs events SnoopCompile cannot parse. They are
+      # reported without a name, and method events in the same capture still parse.
+      mixed =
+        "module Other\nconst X = 1\nf() = X\ng(::Int) = 1\napplyg(c) = g(c[1])\nend\n" *
+        "Other.f(); Other.applyg(Any[1]); @eval Other g(::AbstractFloat) = 3; " *
+        "@eval Other const X = 2"
+      both = invalidations(dir; workload=mixed, all=true)
+      @test any(f -> startswith(f.what, "redefined binding"), both)
+      @test any(f -> occursin("g(::AbstractFloat)", f.what), both)
+      @test only(filter(f -> startswith(f.what, "redefined binding"), both)).value >= 1
+      @test isempty(invalidations(dir; workload=mixed))
       # Loading the package alone invalidates nothing here.
       @test isempty(invalidations(dir))
     end

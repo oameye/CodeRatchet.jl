@@ -34,13 +34,9 @@ function slot_name(code, slot)
   return 1 <= index <= length(code.slotnames) ? string(code.slotnames[index]) : string(slot)
 end
 
-function method_boxes(m::Method)
-  code = try
-    Base.uncompressed_ast(m)
-  catch
-    # A generated or `ccall`-only method has no lowered body to read.
-    return Tuple{String}[]
-  end
+# The boxes in one lowered body. A box is either assigned to a named slot, or, in
+# SSA form, a bare statement whose value is used directly and so has no name.
+function lowered_boxes(code::Core.CodeInfo)
   found = Tuple{String}[]
   for stmt in code.code
     if stmt isa Expr && stmt.head === :(=) && length(stmt.args) == 2
@@ -50,6 +46,16 @@ function method_boxes(m::Method)
     end
   end
   return found
+end
+
+function method_boxes(m::Method)
+  code = try
+    Base.uncompressed_ast(m)
+  catch
+    # A generated or `ccall`-only method has no lowered body to read.
+    return Tuple{String}[]
+  end
+  return lowered_boxes(code)
 end
 
 """

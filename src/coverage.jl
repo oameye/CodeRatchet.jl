@@ -110,6 +110,39 @@ function with_unrun_code(path::AbstractString, table::Dict{Int,Int})
   return Dict{Int,Int}(i => c for (i, c) in enumerate(counts) if c !== nothing)
 end
 
+# Julia calls a method whose body is a literal through its inferred constant, so
+# the call never runs the method and no line of it is ever counted. A line like
+# `f(::Any) = false` therefore reads as uncovered even when it is called all the
+# time. These are the lines of such definitions, so a finding can say so.
+function constant_return_lines(root::AbstractString, rel::AbstractString)
+  lines = Set{Int}()
+  walk(parse_file(root, rel)) do e, _
+    body = if is_function_assignment(e)
+      e.args[2]
+    elseif e.head === :function && length(e.args) == 2
+      e.args[2]
+    else
+      return nothing
+    end
+    is_literal(sole_statement(body)) && union!(lines, line_numbers!(Int[], e))
+    return nothing
+  end
+  return lines
+end
+
+is_literal(x) = x isa Union{Number,Bool,String,QuoteNode} || x === :nothing
+
+# The one statement of a block, or the expression itself when it is not a block,
+# with a bare `return x` read as `x`.
+function sole_statement(body)
+  if body isa Expr && body.head === :block
+    real = filter(x -> !(x isa LineNumberNode), body.args)
+    body = length(real) == 1 ? only(real) : nothing
+  end
+  body isa Expr && body.head === :return && length(body.args) == 1 && return body.args[1]
+  return body
+end
+
 """
 Run the package's tests with line coverage and return the LCOV file's path,
 inside a fresh temporary directory so no earlier run can contaminate it.
@@ -151,12 +184,19 @@ function coverage(target=pwd(); lcov=nothing, paths=["src", "ext"])
     # A file the run never loaded has no record at all, which means every
     # executable line of it is uncovered, not that there is nothing to report.
     table = with_unrun_code(joinpath(root, rel), get(hits, rel, Dict{Int,Int}()))
+    constant_lines = constant_return_lines(root, rel)
     for (name, lines) in misses_by_definition(root, rel, table)
       sort!(lines)
+      note =
+        issubset(lines, constant_lines) ? "; constant-return, calls are never counted" : ""
       push!(
         items,
         Finding(
-          rel, first(lines), name, length(lines), "uncovered lines: $(join(lines, ", "))"
+          rel,
+          first(lines),
+          name,
+          length(lines),
+          "uncovered lines: $(join(lines, ", "))$note",
         ),
       )
     end

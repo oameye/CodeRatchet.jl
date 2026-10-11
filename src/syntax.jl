@@ -172,7 +172,10 @@ function definition_name(e0)
   elseif oneof(e.head, (:abstract, :primitive))
     return isempty(e.args) ? "" : defname(e.args[1])
   elseif e.head === :const
-    return e.args[1] isa Expr ? defname(e.args[1].args[1]) : defname(e.args[1])
+    target = e.args[1] isa Expr ? e.args[1].args[1] : e.args[1]
+    # `const K::Int = 1` declares K; the type is the last argument of the `::`.
+    target isa Expr && target.head === :(::) && return defname(target.args[1])
+    return defname(target)
   elseif e.head === :macrocall
     # A macro wrapping a definition names the definition, not the macro.
     inner = definition_name(e.args[end])

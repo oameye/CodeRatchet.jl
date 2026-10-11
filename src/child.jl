@@ -14,18 +14,17 @@ tools_environment() = joinpath(first(DEPOT_PATH), "environments", "coderatchet")
 
 const TOOLS = ["SnoopCompileCore", "SnoopCompile", "PkgCacheInspector"]
 
-function ensure_tools()
-  dir = tools_environment()
+function ensure_tools(dir::AbstractString=tools_environment(); tools=TOOLS)
   isfile(joinpath(dir, "Manifest.toml")) && return dir
   mkpath(dir)
-  code = "using Pkg; Pkg.add($(repr(TOOLS)))"
+  code = "using Pkg; Pkg.add($(repr(collect(tools))))"
   cmd = `$(Base.julia_cmd()) --code-coverage=none --startup-file=no --project=$dir -e $code`
   log = IOBuffer()
   # A parent running under `Pkg.test` carries a sandboxed load path with no
   # stdlibs in it, and the child would then not find Pkg.
   clean_env = addenv(cmd, "JULIA_LOAD_PATH" => nothing, "JULIA_PROJECT" => nothing)
   ok = success(pipeline(clean_env; stdout=log, stderr=log))
-  ok || error("could not install $(join(TOOLS, ", ")) into $dir:\n", String(take!(log)))
+  ok || error("could not install $(join(tools, ", ")) into $dir:\n", String(take!(log)))
   return dir
 end
 

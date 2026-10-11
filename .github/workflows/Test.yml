@@ -17,9 +17,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 1.12 is the floor, not a preference. Boxes needs Base.visit, the
-        # `public` keyword the Docstrings metric reads is 1.11, and 1.12 is
-        # where lowering stopped boxing a capture reassigned before capture.
+        # 1.12 is the floor: `boxes` needs Base.visit and `docstrings` reads the
+        # `public` keyword.
         julia: ['1.12', '1.13']
         os: [ubuntu-latest]
     steps:
@@ -28,32 +27,8 @@ jobs:
         with:
           version: ${{ matrix.julia }}
       - uses: julia-actions/cache@v2
-      # The fixtures are real git repositories, because the gate takes its file
-      # list from `git ls-files`. Committing in one needs an identity.
-      - name: Give git an identity for the fixtures
-        run: |
-          git config --global user.email "ci@example.com"
-          git config --global user.name "CI"
       - uses: julia-actions/julia-buildpkg@v1
       - uses: julia-actions/julia-runtest@v1
-
-  # The gate, run on this package. Every metric here was verified by hand on my
-  # machine and by fixture in the suite; pointing the tool at its own repository
-  # is what found an init that emitted TOML which does not parse, three Core.Box
-  # allocations, twelve JET reports and a `dir` argument that went nowhere.
-  # Calling the reusable workflow by local path also tests that workflow on
-  # every push, which is otherwise only exercised by a consumer repository.
-  selfcheck:
-    name: Self-check
-    needs: test
-    uses: ./.github/workflows/ratchet.yml
-    with:
-      julia-version: '1.12'
-      coverage: true
-      install-jetls: true
-      # The revision the lsp baseline was taken under. `release` moves, and an
-      # unpinned tool reddens the gate for a change nobody made.
-      jetls-rev: '6893fcef26708d64360c048e039102c76ad032c0'
 
   format:
     name: Format

@@ -1,194 +1,12 @@
 """
-The house-rule half of the gate: patterns a repository has decided against.
-
-Pure syntax, so it loads nothing and costs about a second. Every rule here is a
-*preference*, not a defect, which is exactly the kind of rule a ratchet suits:
-the rules that most need holding are the ones a codebase already breaks, and an
-absolute gate on those is unadoptable on the day you write it.
-
-Two kinds of rule. A **named rule** walks the syntax tree and is precise. A
-**pattern rule** is a regex over the file's lines, for a repository idiom no
-built-in covers. Named rules first: a regex that has to know Julia syntax is a
-regex that is wrong on the case you have not thought of yet.
+The named house rules, each a function from `(rel, tree)` to the source lines
+that breach it. Syntax-tree rules only: a regex that has to know Julia syntax is
+wrong on the case nobody thought of, and a wrong finding has no place here.
 """
+const STYLE_RULES = Dict{Symbol,Function}()
 
-"""
-    StyleRule
+# --- union_nothing ----------------------------------------------------------
 
-One thing a repository has ruled against. Named or regex, never both, so the
-count for a rule has one definition and one place it comes from.
-"""
-abstract type StyleRule end
-
-"""
-    NamedRule(name)
-
-A built-in syntax-tree rule. See [`STYLE_RULES`](@ref) for the set.
-"""
-struct NamedRule <: StyleRule
-  name::String
-end
-
-"""
-    PatternRule(name, pattern, reason)
-
-A repository-specific regex, counted once per matching line.
-
-Lines rather than matches: a regex written by hand rarely anchors, and counting
-every match makes the number jump on a line the author would call one breach.
-"""
-struct PatternRule <: StyleRule
-  name::String
-  pattern::Regex
-  reason::String
-end
-
-rule_name(rule::StyleRule) = rule.name
-
-"""
-    Style(rules)
-
-House-rule counts per file, one binding number per rule.
-
-Adding a rule to a repository that already breaks it turns the gate red on
-every offending file at once, because a number absent from the baseline reads
-as zero. That is the intended shape: the first `refresh --accept-change` after
-adding a rule writes the debt down explicitly, in a diff a reviewer can size.
-"""
-struct Style <: Metric
-  rules::Vector{StyleRule}
-end
-
-"""
-    Style(root; dir)
-
-Read the rule set from `[style]` in `rulings.toml`.
-"""
-function Style(root::AbstractString; dir::AbstractString=ratchet_dir(root))
-  return Style(style_rules(read_rulings(dir)))
-end
-
-metric_name(::Style) = "style"
-binding(metric::Style) = Tuple(rule_name(r) for r in metric.rules)
-row_numbers(metric::Style) = binding(metric)
-
-function provenance(metric::Style, root::AbstractString)
-  return Dict{String,Any}(
-    "metric" => "style",
-    "rules" => sort([rule_name(r) for r in metric.rules]),
-    "commit" => short_commit(root),
-  )
-end
-
-"""
-    style_rules(rulings) -> Vector{StyleRule}
-
-The configured rules, named ones first.
-
-An empty rule set is an error rather than a gate that passes everything. A
-metric that measures nothing and reports PASS is the worst outcome available:
-it reads as evidence.
-"""
-function style_rules(rulings::Rulings)
-  block = get(rulings.raw, "style", Dict{String,Any}())
-  rules = StyleRule[]
-  for name in get(block, "rules", String[])
-    key = String(name)
-    haskey(STYLE_RULES, key) || error(
-      "unknown style rule $(repr(key)). Known rules: " *
-      join(sort(collect(keys(STYLE_RULES))), ", "),
-    )
-    push!(rules, NamedRule(key))
-  end
-  for entry in get(rulings.raw, "style_pattern", Dict[])
-    for field in ("name", "pattern", "reason")
-      haskey(entry, field) ||
-        error("every [[style_pattern]] needs `name`, `pattern` and `reason`; got $(entry)")
-    end
-    push!(
-      rules,
-      PatternRule(
-        String(entry["name"]), Regex(String(entry["pattern"])), String(entry["reason"])
-      ),
-    )
-  end
-  isempty(rules) && error(
-    "the style metric needs at least one rule. Add `rules` to the [style] block " *
-    "in $RULINGS, or a [[style_pattern]].",
-  )
-  seen = Set{String}()
-  for rule in rules
-    rule_name(rule) in seen &&
-      error("two style rules are both named $(repr(rule_name(rule)))")
-    push!(seen, rule_name(rule))
-  end
-  return rules
-end
-
-# --- walking ----------------------------------------------------------------
-
-"""
-    FileUnderTest
-
-One file, in the forms the rules need it: its repository-relative path, its
-syntax tree, and its lines.
-
-A struct rather than three positional arguments, because no rule needs all
-three and a uniform signature made every implementation ignore most of it.
-Eight `unused-argument` diagnostics said so, from this package pointed at
-itself.
-"""
-struct FileUnderTest
-  rel::String
-  tree::Any
-  lines::Vector{String}
-end
-
-"""
-    parse_file(root, rel)
-
-The file's syntax tree, or an empty `Expr(:toplevel)` when the file cannot be
-read at all.
-
-A syntax error does not reach the `catch`: `Meta.parseall` returns a tree
-carrying an `Expr(:error, ...)` node rather than throwing, and that node holds
-no definition and no `Union`, so every rule reads zero from it. The zero is not
-a pass, because `parse_failures` fails the whole gate on an unparsable file
-separately. That split is the point: a gate that stops measuring without
-failing is worse than no gate.
-
-The `catch` is for the file being unreadable, which is a different failure and
-is why it returns an empty tree rather than propagating.
-"""
-function parse_file(root::AbstractString, rel::AbstractString)
-  try
-    return Meta.parseall(read(joinpath(root, rel), String); filename=rel)
-  catch
-    return Expr(:toplevel)
-  end
-end
-
-"""
-    walk(f, e)
-
-Call `f` on every `Expr` in the tree, outermost first.
-"""
-function walk(f, e)
-  e isa Expr || return nothing
-  f(e)
-  for a in e.args
-    walk(f, a)
-  end
-  return nothing
-end
-
-# --- the named rules --------------------------------------------------------
-
-"""
-    is_nothing_type(e) -> Bool
-
-Whether `e` names `Nothing`, written bare or qualified.
-"""
 is_nothing_type(e::Symbol) = e === :Nothing
 function is_nothing_type(e::Expr)
   return e.head === :. && length(e.args) == 2 && is_nothing_type(e.args[2])
@@ -202,179 +20,151 @@ names_union(e::QuoteNode) = names_union(e.value)
 names_union(::Any) = false
 
 """
-    count_union_nothing(root, rel, tree) -> Int
-
 `Union{Nothing,T}` in any position, however the two names are qualified.
 
 The union is cheap for the compiler and expensive for the caller: every one of
-them makes `nothing` a value the next function has to handle, and the handling
-spreads. Sink the absence into a type that has a meaningful zero, a separate
-method, or an error at the boundary.
+them makes `nothing` a value the next function has to handle.
 """
-function count_union_nothing(file::FileUnderTest)
-  # A Ref, not `n = 0`. `n += 1` inside the closure reassigns a captured
-  # binding, and lowering answers that with a Core.Box: every read becomes a
-  # dynamic lookup. This package's own Boxes metric found it here.
-  found = Ref(0)
-  walk(file.tree) do e
+function union_nothing_lines(::AbstractString, tree)
+  lines = Int[]
+  walk(tree) do e, line
     e.head === :curly || return nothing
     length(e.args) >= 2 || return nothing
     names_union(e.args[1]) || return nothing
-    # `any` is three-valued, so inference gives it Union{Bool,Missing} even
-    # where no predicate here can return missing. `=== true` keeps a Bool out
-    # of `&&` rather than leaving a Missing to reach it.
-    any(is_nothing_type, e.args[2:end])::Bool && (found[] += 1)
+    any(is_nothing_type, e.args[2:end])::Bool && push!(lines, line)
     return nothing
   end
-  return found[]
+  return lines
 end
+STYLE_RULES[:union_nothing] = union_nothing_lines
 
-const DEFINITION_HEADS = (:function, :macro, :struct, :abstract, :primitive, :const)
+# --- underscore_name --------------------------------------------------------
 
 """
-    count_underscore_names(root, rel, tree) -> Int
-
 Definitions named with a leading underscore, plus the file itself when its own
-name carries one.
-
-Julia's module system decides what is visible. A leading underscore states a
-second, weaker convention beside it, and the two disagree the moment a name is
+name carries one. Julia's module system decides visibility; a leading underscore
+states a second, weaker convention that disagrees with it the moment a name is
 exported.
-
-`:macrocall` is walked through rather than counted, so a documented or
-`@kwdef`-wrapped definition is counted once at the definition it wraps.
 """
-function count_underscore_names(file::FileUnderTest)
-  found = Ref(startswith(basename(file.rel), "_") ? 1 : 0)
-  walk(file.tree) do e
-    named = if oneof(e.head, DEFINITION_HEADS)
-      definition_name(e)
-    elseif e.head === :(=) && e.args[1] isa Expr && oneof(e.args[1].head, (:call, :where))
+function underscore_name_lines(rel::AbstractString, tree)
+  lines = startswith(basename(rel), "_") ? [1] : Int[]
+  walk(tree) do e, line
+    named = if oneof(e.head, DEFINITION_HEADS) || is_function_assignment(e)
       definition_name(e)
     else
       ""
     end
-    startswith(named, "_") && (found[] += 1)
+    startswith(named, "_") && push!(lines, line)
     return nothing
   end
-  return found[]
+  return lines
 end
+STYLE_RULES[:underscore_name] = underscore_name_lines
 
-"""
-    count_implicit_kwargs(root, rel, tree) -> Int
+# --- implicit_kwarg ---------------------------------------------------------
 
-Keyword arguments passed at a call site with no `;` before them: `f(a = 1)`
-rather than `f(; a = 1)`.
-
-The semicolon is what tells a reader, at the call site, that the name binds to
-a keyword rather than to a position. Julia does not need it and a reader does.
-
-Definition signatures are exempt, and the exemption is load-bearing rather than
-lenient: `f(x, a = 1)` in a signature declares an *optional positional*
-argument, which the parser also represents as `:kw`. Counting those would flag
-a construct that has nothing to do with keywords.
-"""
-count_implicit_kwargs(file::FileUnderTest) = kwargs_in(file.tree)
-
-function kwargs_in(e)
-  e isa Expr || return 0
-  if oneof(e.head, (:function, :macro)) && length(e.args) >= 2
-    return kwargs_in_signature(e.args[1]) + sum(kwargs_in, e.args[2:end]; init=0)
-  elseif e.head === :(=) &&
-    length(e.args) == 2 &&
-    e.args[1] isa Expr &&
-    oneof(e.args[1].head, (:call, :where))
-    return kwargs_in_signature(e.args[1]) + kwargs_in(e.args[2])
-  end
-  n = 0
-  if e.head === :call
-    for a in e.args[2:end]
-      a isa Expr && a.head === :kw && (n += 1)
+function kw_children!(out::Vector{Int}, args, line::Int)
+  for a in args
+    if a isa LineNumberNode
+      line = a.line
+    else
+      kw_lines!(out, a, line)
     end
   end
-  return n + sum(kwargs_in, e.args; init=0)
+  return nothing
 end
 
-"""
-    kwargs_in_signature(sig) -> Int
-
-Count inside a definition signature, where a top-level `:kw` is a positional
-default rather than a keyword. Default *values* are ordinary code and are
-counted normally, so `f(x = g(a = 1))` still reports the inner call.
-"""
-function kwargs_in_signature(sig)
-  sig isa Expr || return 0
-  if sig.head === :where
-    return kwargs_in_signature(sig.args[1]) + sum(kwargs_in, sig.args[2:end]; init=0)
+function kw_lines!(out::Vector{Int}, e, line::Int)
+  e isa Expr || return nothing
+  if oneof(e.head, (:function, :macro)) && length(e.args) >= 2
+    sig_lines!(out, e.args[1], line)
+    kw_children!(out, e.args[2:end], line)
+    return nothing
+  elseif is_function_assignment(e) && length(e.args) == 2
+    sig_lines!(out, e.args[1], line)
+    kw_lines!(out, e.args[2], line)
+    return nothing
   end
-  sig.head === :call || return kwargs_in(sig)
-  n = 0
+  if e.head === :call
+    for a in e.args[2:end]
+      a isa Expr && a.head === :kw && push!(out, line)
+    end
+  end
+  kw_children!(out, e.args, line)
+  return nothing
+end
+
+# Inside a definition signature a top-level `:kw` is an optional positional
+# argument, not a keyword. Default values are ordinary code and still count.
+function sig_lines!(out::Vector{Int}, sig, line::Int)
+  sig isa Expr || return nothing
+  if sig.head === :where
+    sig_lines!(out, sig.args[1], line)
+    kw_children!(out, sig.args[2:end], line)
+    return nothing
+  end
+  if sig.head !== :call
+    kw_lines!(out, sig, line)
+    return nothing
+  end
   for a in sig.args[2:end]
     if a isa Expr && a.head === :kw
-      n += sum(kwargs_in, a.args[2:end]; init=0)
+      kw_children!(out, a.args[2:end], line)
     elseif a isa Expr && a.head === :parameters
       for p in a.args
-        n += if p isa Expr && p.head === :kw
-          sum(kwargs_in, p.args[2:end]; init=0)
+        if p isa Expr && p.head === :kw
+          kw_children!(out, p.args[2:end], line)
         else
-          kwargs_in(p)
+          kw_lines!(out, p, line)
         end
       end
     else
-      n += kwargs_in(a)
+      kw_lines!(out, a, line)
     end
   end
-  return n
+  return nothing
 end
 
 """
-The named rules, by the name a `rulings.toml` writes. Each takes a
-[`FileUnderTest`](@ref) and returns a count.
+Keyword arguments passed at a call site with no `;`: `f(a = 1)` rather than
+`f(; a = 1)`. The semicolon tells a reader the name binds to a keyword rather
+than to a position.
 """
-const STYLE_RULES = Dict{String,Function}(
-  "union_nothing" => count_union_nothing,
-  "underscore_name" => count_underscore_names,
-  "implicit_kwarg" => count_implicit_kwargs,
-)
-
-# --- measuring --------------------------------------------------------------
-
-count_rule(rule::NamedRule, file::FileUnderTest) = STYLE_RULES[rule.name](file)
-function count_rule(rule::PatternRule, file::FileUnderTest)
-  return count(line -> occursin(rule.pattern, line), file.lines)
+function implicit_kwarg_lines(::AbstractString, tree)
+  out = Int[]
+  kw_lines!(out, tree, 0)
+  return out
 end
+STYLE_RULES[:implicit_kwarg] = implicit_kwarg_lines
 
-function measure(metric::Style, root::AbstractString; dir::AbstractString=ratchet_dir(root))
-  rows = Dict{String,Row}()
-  for rel in scoped_files(root, read_rulings(dir).scope)
-    lines = try
-      readlines(joinpath(root, rel))
-    catch
-      String[]
-    end
-    file = FileUnderTest(rel, parse_file(root, rel), lines)
-    rows[rel] = Row(Dict(rule_name(r) => count_rule(r, file) for r in metric.rules))
+"""
+    style(target=pwd(); rules=collect(keys(STYLE_RULES)), paths=["src", "ext"])
+
+Every breach of a house rule, one finding per line, with the source line as the
+detail.
+
+The rules are `:union_nothing` (`Union{Nothing,T}`), `:underscore_name` (a
+definition or file named with a leading underscore) and `:implicit_kwarg`
+(`f(a = 1)` instead of `f(; a = 1)`). Pure syntax, about a second.
+"""
+function style(target=pwd(); rules=sort(collect(keys(STYLE_RULES))), paths=["src", "ext"])
+  for rule in rules
+    haskey(STYLE_RULES, rule) || throw(
+      ArgumentError(
+        "unknown style rule $(repr(rule)); known: " *
+        join(repr.(sort(collect(keys(STYLE_RULES)))), ", "),
+      ),
+    )
   end
-  return rows
-end
-
-"""
-    style_candidates(root; dir) -> Vector{Candidate}
-
-Files breaching a house rule, ranked by breach count.
-
-Unlike complexity there is no threshold to divide by, so the rank is the count
-itself: one file with nine breaches outranks three files with one each, which
-is the order a person would work them in.
-"""
-function style_candidates(root::AbstractString; dir::AbstractString=ratchet_dir(root))
-  metric = Style(root; dir)
-  found = Candidate[]
-  for (rel, row) in measure(metric, root; dir)
-    for rule in metric.rules
-      n = get(row, rule_name(rule), 0)
-      n > 0 && push!(found, Candidate(rel, "style", "$(rule_name(rule)) x$n", Float64(n)))
+  root = package_root(target)
+  items = Finding[]
+  for rel in source_files(root, paths)
+    tree = parse_file(root, rel)
+    text = readlines(joinpath(root, rel))
+    for rule in rules, line in STYLE_RULES[rule](rel, tree)
+      shown = 1 <= line <= length(text) ? strip(text[line]) : ""
+      push!(items, Finding(rel, line, String(rule), 1, String(shown)))
     end
   end
-  return found
+  return ranked("style", items)
 end

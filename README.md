@@ -39,7 +39,7 @@ style rules, no baselines, no config files.
 
 | Function | What it reports | Cost |
 | --- | --- | --- |
-| `complexity(target; by=:cyclomatic, over=1)` | every definition, ranked by `:cyclomatic`, `:cognitive` or `:arguments`; `over` only hides low values | ~1 s |
+| `complexity(target; by=:cyclomatic, over=1)` | every definition, ranked by `:cyclomatic`, `:cognitive` or `:arguments` (parameter count, read from the syntax tree, return annotations included); `over` only hides low values | ~1 s |
 | `style(target; rules=...)` | `:union_nothing`, `:underscore_name`, `:implicit_kwarg`, one finding per line | ~1 s |
 | `docstrings(target)` | names declared public (`export`, `public`, `@public`) with no docstring anywhere in the package | ~1 s |
 | `boxes(mod; root=...)` | `Core.Box` captures per method, with the variable's name, from lowered code | seconds |

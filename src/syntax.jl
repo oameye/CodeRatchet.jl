@@ -111,6 +111,10 @@ defname(::Any) = ""
 function defname(e::Expr)
   isempty(e.args) && return ""
   oneof(e.head, (:call, :where, :(<:), :curly, :macrocall)) && return defname(e.args[1])
+  # `f(x)::T` is a return annotation: the name is the call's, not the type's.
+  if e.head === :(::) && length(e.args) == 2 && e.args[1] isa Expr
+    oneof(e.args[1].head, (:call, :where, :(::))) && return defname(e.args[1])
+  end
   oneof(e.head, (:(::), :.)) && return defname(e.args[end])
   return ""
 end
@@ -128,8 +132,26 @@ function unwrap(e)
   return e
 end
 
+# The call inside a signature, with `where` clauses and return annotations
+# peeled off in any order: `f(x)::T where {T}`, `f(x) where {T}`, `f(x)::T`.
+function signature_call(sig)
+  while sig isa Expr
+    sig.head === :call && return sig
+    if sig.head === :where || (sig.head === :(::) && length(sig.args) == 2)
+      sig = sig.args[1]
+    else
+      return nothing
+    end
+  end
+  return nothing
+end
+
+# A short-form definition `f(x) = ...`, also with a return annotation or `where`.
 function is_function_assignment(e::Expr)
-  return e.head === :(=) && e.args[1] isa Expr && oneof(e.args[1].head, (:call, :where))
+  return e.head === :(=) &&
+         e.args[1] isa Expr &&
+         oneof(e.args[1].head, (:call, :where, :(::))) &&
+         signature_call(e.args[1]) !== nothing
 end
 
 """

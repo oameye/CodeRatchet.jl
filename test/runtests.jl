@@ -48,6 +48,54 @@ place(f) = (f.file, f.line, f.what)
     end
   end
 
+  @testset "argument counts, including return-annotated signatures" begin
+    src = """
+    function plain(a, b, c, d, e, f)
+      return 1
+    end
+    function annotated(a, b, c, d, e, f)::Int
+      return 1
+    end
+    function annotated_where(a, b, c, d, e, f)::T where {T}
+      return 1
+    end
+    short(a, b, c)::Int = 1
+    withkw(a, b; k = 1, l = 2, rest...) = 1
+    none() = 1
+    """
+    with_package("src/a.jl" => src) do dir
+      found = complexity(dir; by=:arguments, over=0)
+      counts = Dict(f.what => f.value for f in found)
+      @test counts == Dict(
+        "plain" => 6,
+        "annotated" => 6,
+        "annotated_where" => 6,
+        "short" => 3,
+        "withkw" => 5,
+        "none" => 0,
+      )
+      @test only(filter(f -> f.what == "annotated", found)).line == 4
+    end
+  end
+
+  @testset "a return annotation does not rename a definition" begin
+    src = """
+    module Named
+    export typed
+    typed(x)::Int = x
+    function longform(x)::Int
+      return x
+    end
+    end
+    """
+    with_package("src/Named.jl" => src) do dir
+      @test [f.what for f in docstrings(dir)] == ["typed"]
+      lcov = joinpath(dir, "lcov.info")
+      write(lcov, "SF:src/Named.jl\nDA:3,0\nDA:5,0\nend_of_record\n")
+      @test sort([f.what for f in coverage(dir; lcov)]) == ["longform", "typed"]
+    end
+  end
+
   @testset "style" begin
     src = """
     function a(x::Union{Nothing,Int})
